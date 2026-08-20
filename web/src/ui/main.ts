@@ -118,11 +118,6 @@ function syncSources(): void {
   toggle.setAttribute("aria-pressed", String(on));
   toggle.setAttribute("aria-label",
     on ? "Stop searching MS MARCO-XI" : "Search MS MARCO-XI");
-
-  // The sample questions are about the Hindi corpus, so they are hidden when
-  // it is switched off rather than left as buttons that cannot work.
-  const suggest = document.getElementById("suggest");
-  if (suggest) suggest.hidden = !on;
 }
 
 // -- languages --------------------------------------------------------------
@@ -815,9 +810,6 @@ document.addEventListener("keydown", (e) => {
   void toggleMic();
 });
 
-for (const chip of document.querySelectorAll<HTMLButtonElement>(".chip")) {
-  chip.addEventListener("click", () => void ask(chip.dataset.q ?? ""));
-}
 $("corpus-toggle").addEventListener("click", () => setCorpus(!(engine?.corpusOn ?? false)));
 $("speak-btn").addEventListener("click", () => setSpeak(!speakOn));
 $("type-btn").addEventListener("click",

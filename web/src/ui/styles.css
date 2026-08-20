@@ -473,31 +473,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
    explained here on arrival. */
 .welcome { padding-top: 6vh; padding-bottom: 10px; }
 .welcome-h {
-  margin: 0 0 26px;
+  margin: 0;
   font: 300 44px/1.08 var(--display);
   letter-spacing: -0.028em;
 }
 
-.suggest { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip {
-  display: inline-flex; align-items: baseline; gap: 9px;
-  padding: 8px 14px;
-  font-size: 14.5px;
-  text-align: left;
-  color: var(--ink-2);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color .16s, border-color .16s, background .16s;
-}
-.chip:hover { color: var(--ink); border-color: var(--ink-3); background: var(--ground-2); }
-.chip-lang {
-  font-size: 11.5px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
 
 /* -- messages ------------------------------------------------------------ */
 
