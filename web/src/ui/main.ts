@@ -133,11 +133,6 @@ function syncSources(): void {
   // while it is switched off would be offering a button that cannot work.
   const suggest = document.getElementById("suggest");
   if (suggest) suggest.hidden = !on;
-  // The hint now offers *adding* a document rather than switching the dataset
-  // on, so it is shown while the corpus is live and hidden once the visitor has
-  // taken it up.
-  const hint = document.getElementById("welcome-hint");
-  if (hint) hint.hidden = !!store?.hasEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,11 +404,6 @@ async function boot(): Promise<void> {
   orb.set("idle", "Ready", micReady()
     ? "tap the lamp, or press space, and speak"
     : "no microphone here — the keyboard is open below");
-  // Both paths now hold the fire still while a question is timed, so the note
-  // no longer needs to distinguish them — and claiming the worker "costs a
-  // question nothing" was true of main-thread time and not of a contended core.
-  $("composer-note").textContent =
-    "Searched in this browser. The lamp holds still while a question is timed.";
   // Deliberately not focusing the text field: it is hidden, and focusing the
   // lamp instead means the first Enter or Space starts listening.
   if (micReady()) $<HTMLButtonElement>("orb").focus();
@@ -828,7 +818,6 @@ for (const chip of document.querySelectorAll<HTMLButtonElement>(".chip")) {
   chip.addEventListener("click", () => void ask(chip.dataset.q ?? ""));
 }
 $("corpus-toggle").addEventListener("click", () => setCorpus(!(engine?.corpusOn ?? false)));
-$("try-corpus").addEventListener("click", () => openAddPanel());
 $("speak-btn").addEventListener("click", () => setSpeak(!speakOn));
 $("type-btn").addEventListener("click",
   () => setTyping($("stage").dataset.typing !== "1"));
