@@ -27,8 +27,9 @@ We measured the obvious architecture before writing code, and it cannot work:
 The fastest speech-to-text in existence spends **150 of the 200ms on its own**.
 
 So we moved the work instead of trying to outrun physics. The index and the
-retrieval engine are shipped to the browser once; every subsequent question is
-answered on the user's own machine. **The network isn't reduced — it's absent.**
+retrieval engine are shipped to the browser once; **retrieval** for every
+subsequent question happens on the user's own machine, with no network in it at
+all.
 
 Consequences, all of which we wanted anyway:
 
@@ -36,7 +37,51 @@ Consequences, all of which we wanted anyway:
 - Static hosting: free, global CDN, **never sleeps, no cold starts**. A sleeping
   free tier would put a 30-second first request into P100 and destroy it.
 - The system gets faster with more users, since each brings their own CPU.
-- Documents a user adds never leave their machine.
+- A document a user adds is parsed, chunked, embedded and indexed entirely in
+  their browser and is never uploaded.
+
+---
+
+## What the 200 ms actually covers, and what it does not
+
+**Retrieval is the guarantee. Generation is the answer.** They are different
+steps with different costs, and this system reports them as two numbers because
+adding them together would either break a promise it keeps or hide a cost the
+user pays.
+
+    6.8 ms retrieval        in this browser, hard-capped at 200 ms
+    219 ms answer           a model, over the network, as long as it takes
+
+An earlier version of this app had only the first number, because it had only
+the first step. Retrieval found the passage and the interface printed it. Ask a
+CV "what is my name" and it replied:
+
+    name: srinidhi bhat, age:45, sex:M, faults: crying
+
+That is a search result. The answer is "Your name is Srinidhi Bhat", and getting
+from one to the other is not cosmetic — it is the *generation* half of
+retrieval-augmented generation, and without it the acronym is two-thirds
+marketing. So the retrieved passages now go to a model with the question, and
+what comes back is checked against them (gate 3) before it is allowed to stand.
+The passage is still one click away under every answer, because a claim about a
+document should be checkable against the document.
+
+**The honest privacy boundary.** Indexing is local and stays local. But an
+answer written by a hosted model means the two or three passages that answer
+your question are sent to that provider — not the document, but not nothing
+either. Three ways to sit with that:
+
+| Generator | Passages leave the machine? | Speed | Cost |
+|---|---|---|---|
+| **Groq** (default) | yes, 2–3 passages | ~1000 tok/s, fastest available | free tier, no card |
+| Anthropic | yes, 2–3 passages | ~1–2 s | paid |
+| Local (Ollama / llama.cpp) | **no** | your hardware | free |
+| none configured | no | — | free |
+
+With nothing configured the app still retrieves and still answers in under
+200 ms — it just shows the matching passage, *labelled as a quotation* rather
+than dressed up as an answer. Set one environment variable to change that; see
+`web/.env.example`.
 
 ---
 
@@ -195,9 +240,36 @@ one split where 3,012 labels say which is which. The corpus is the distribution
 `minTopScore` was fitted on, so there is no mismatch there to correct, and its
 reported guardrail numbers are unchanged to the query.
 
-The extractive fast path is **grounded by construction** — every character is
-copied from a retrieved passage. Gate 3 exists for the optional LLM-polished
-answer, where a fluent model can quietly invent a fact.
+**The rescue floor was measured on the wrong split, and it showed.** It was
+0.40, fitted on a small sample, and never tested against the case it governs —
+user documents. `bench/usersource.ts` now does that, on 39 labelled questions
+over one field-structured document and one prose one:
+
+| rescue floor | coverage | abstention |
+|---|---|---|
+| none | 40.0% (10/25) | 100% (14/14) |
+| 0.40 *(was)* | 52.0% (13/25) | 100% (14/14) |
+| 0.30 | 76.0% (19/25) | 92.9% (13/14) |
+| **0.20** *(now)* | **88.0% (22/25)** | **92.9% (13/14)** |
+| 0.15 / 0.00 | 88.0% (22/25) | 92.9% (13/14) |
+
+Half of everything a user's own document could answer was being refused. Asked
+"what is the name" of a file whose first line is `name: srinidhi bhat, age: 45`,
+the app declined — with the correct passage at rank 1, found by four independent
+chunking strategies, sharing every content word with the question. 0.20 is the
+*highest* value on the coverage plateau, so the floor still excludes the
+genuinely-unrelated band ("what is the capital of Peru" scores 0.123 here)
+rather than being switched off. The corpus split is byte-identical before and
+after: 336 answered, 64 refused, coverage 89.1%.
+
+Gate 3 changed shape too. It scored *every* token, including function words, at
+0.62 — so "Your name is Srinidhi Bhat." grounded at 0.60 and was discarded, and
+"You are 45 years old." at 0.33, both perfectly supported. That is a check on
+how much of an answer's grammar appears in a document. It is now two tests: an
+**exact** one on specifics — every number and every name in the answer must
+appear in the retrieved text, no threshold, because a date the document does
+not contain is not 90% grounded — and a deliberately low content-word floor as
+a backstop against wholesale topic drift.
 
 ---
 
@@ -268,7 +340,7 @@ neither code path ever executes:
         partials ───┘         ALL IN THE BROWSER               │
                     └──────────────────────────────────────────┘
                                      │
-                                     └─► (off the clock) LLM polish → gate 3 → shown if it passes
+                                     └─► (off the clock) generate → gate 3 → the answer you read
 ```
 
 **Speculative retrieval:** partial transcripts trigger retrieval *while the user
@@ -529,20 +601,38 @@ npm install
 npm run calibrate              # fits the gate-2 threshold; writes public/thresholds.json
 npm run bench                  # P50 / P70 / P100 + retrieval quality
 npm run bench:deadline         # proves the cap holds under budget pressure
-npm run bench:gates            # 42 guardrail cases, incl. one per language
+npm run bench:gates            # 51 guardrail cases, incl. one per language
+npm run bench:usersource       # gate 2 on user documents — the split that governs the rescue
 npm run bench:multilingual     # 15 languages x 200 queries, cross-lingual hit@k
 ```
 
 ```bash
-# 4. run it
+# 4. turn on generated answers — free, ~15 seconds
+#    Key from https://console.groq.com/keys, no card required.
+echo 'GROQ_API_KEY=gsk_your_key_here' > web/.env.local
+
+# 5. run it
 npm run dev                    # http://localhost:5173
 ```
 
-Voice in, voice out, link-adding and the LLM rewrite need the Worker; typed
-questions do not. Copy `web/.env.example` to `web/.env` and set
-`VITE_WORKER_BASE` to enable them. Without it the interface falls back to the
-browser's own speech APIs, **labelled as a fallback in the UI** — that exists so
-the app is demonstrable with no keys, not to satisfy the requirement.
+**No Cloudflare account is needed for step 4.** The dev server serves
+`/synthesize` and `/health` itself, from the *same source file* the Worker uses
+(`worker/src/synthesize.ts`), so there is no second implementation to drift and
+local development exercises the production prompt and wire protocol. The key is
+read by `vite.config.ts` in Node and is deliberately not `VITE_`-prefixed, so it
+is never inlined into the browser bundle.
+
+Skip step 4 and everything still runs: retrieval answers in under 200 ms and the
+app shows the matching passage, labelled as a quotation. `web/.env.example`
+documents the Anthropic and local-model alternatives.
+
+Voice in, voice out and link-adding are the parts that genuinely need the Worker
+— a browser cannot set a custom header on a WebSocket handshake, cannot hold a
+speech vendor's key, and cannot read a cross-origin page body. Set
+`VITE_WORKER_BASE` in `web/.env.local` to point at a deployed one. Without it the
+interface falls back to the browser's own speech APIs, **labelled as a fallback
+in the UI** — that exists so the app is demonstrable with no keys, not to satisfy
+the requirement.
 
 ---
 
@@ -554,9 +644,9 @@ origin, are in [DEPLOY.md](DEPLOY.md).** The short version:
 
 ```bash
 cd worker && npx wrangler deploy          # Worker first — the web build bakes its URL in
-npx wrangler secret put SARVAM_API_KEY    # + ELEVENLABS_API_KEY, + ANTHROPIC_API_KEY (optional)
+npx wrangler secret put GROQ_API_KEY      # + SARVAM_API_KEY, + ELEVENLABS_API_KEY
 
-cd .. && echo "VITE_WORKER_BASE=https://chehrag-worker.<subdomain>.workers.dev" > web/.env
+cd .. && echo "VITE_WORKER_BASE=https://chehrag-worker.<subdomain>.workers.dev" >> web/.env.local
 npm run deploy:web                        # build + `wrangler pages deploy web/dist`
 ```
 
@@ -605,7 +695,7 @@ what is only reachable from where it runs.
 | Embeddings (local ONNX, build time and in-browser) | ₹0 |
 | Vector search (in-browser) | ₹0 |
 | Sarvam STT | ₹30/hr; ₹100 free credits ≈ 3.3 hrs |
-| LLM polish (optional, off the fast path) | a few $ |
+| answer generation (Groq free tier) | $0 |
 
 **Free and fast are the same decision here.** Every millisecond spent on a paid
 API is a millisecond of the budget gone; local is what makes 200ms possible.

@@ -42,13 +42,20 @@ never fail silently again. **Step 5 verifies it on the live origin.**
 - A Cloudflare account (free tier is enough for all of this)
 - `npx wrangler login` — opens a browser for OAuth, one time
 
-Optional, for voice. Typed questions work fully without any of them:
+One of these turns on written answers; the rest are for voice. Retrieval works
+fully without any of them — it just quotes the matching passage instead of
+answering from it, and says so.
 
 | Key | Buys |
 |---|---|
+| `GROQ_API_KEY` | **written answers.** Free tier, no card, ~1000 tok/s — https://console.groq.com/keys |
 | `SARVAM_API_KEY` | real speech input (streaming), and spoken answers in the 8 Indic languages ElevenLabs lacks |
 | `ELEVENLABS_API_KEY` | spoken answers in English, Hindi, Tamil |
-| `ANTHROPIC_API_KEY` | the optional LLM rewrite, which runs after the answer and off the clock |
+
+Instead of `GROQ_API_KEY` you may set `ANTHROPIC_API_KEY` (paid, better at
+combining several passages), or `LLM_BASE_URL` + `LLM_MODEL` for any other
+OpenAI-compatible endpoint including a local one. `worker/src/synthesize.ts`
+resolves them in that order.
 
 ---
 
@@ -86,9 +93,9 @@ Keep it.
 Now attach the keys. Secrets take effect immediately; no redeploy needed.
 
 ```bash
-npx wrangler secret put SARVAM_API_KEY
-npx wrangler secret put ELEVENLABS_API_KEY
-npx wrangler secret put ANTHROPIC_API_KEY     # optional
+npx wrangler secret put GROQ_API_KEY           # written answers — free tier
+npx wrangler secret put SARVAM_API_KEY         # voice in
+npx wrangler secret put ELEVENLABS_API_KEY     # voice out
 ```
 
 Check what it thinks it has:
@@ -113,7 +120,7 @@ and hold the Anthropic key.
 
 ```bash
 cd ..
-echo "VITE_WORKER_BASE=https://chehrag-worker.<your-subdomain>.workers.dev" > web/.env
+echo "VITE_WORKER_BASE=https://chehrag-worker.<your-subdomain>.workers.dev" >> web/.env.local
 npm install
 npm run build
 npx wrangler pages deploy web/dist --project-name chehrag --branch main
@@ -214,7 +221,7 @@ Connect to Git → pick `srinidhibhat45/chehrag`.
 | Build output directory | `web/dist` |
 | Environment variable | `VITE_WORKER_BASE` = your Worker URL |
 
-`VITE_WORKER_BASE` has to be set in the dashboard, not just in `web/.env` —
+`VITE_WORKER_BASE` has to be set in the dashboard, not just in `web/.env.local` —
 `.env` is gitignored, and without it a Git-driven build ships a site with no
 voice and no link-fetching.
 

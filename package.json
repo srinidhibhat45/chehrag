@@ -14,12 +14,16 @@
     "bench": "npm --prefix web run bench",
     "calibrate": "npm --prefix web run calibrate",
     "typecheck": "npm --prefix web run typecheck",
-    "deploy": "npm run deploy:worker && npm run deploy:web",
+    "deploy": "./scripts/deploy.sh",
     "deploy:web": "npm run build && npx wrangler pages deploy web/dist --project-name chehrag",
     "deploy:worker": "npm --prefix worker run deploy",
     "bench:multilingual": "npm --prefix web run bench:multilingual",
     "bench:gates": "npm --prefix web run bench:gates",
     "bench:deadline": "npm --prefix web run bench:deadline",
-    "parallel-queries": "cd pipeline && ./.venv/bin/python src/parallel_queries.py --n 500"
+    "parallel-queries": "cd pipeline && ./.venv/bin/python src/parallel_queries.py --n 500",
+    "bench:usersource": "npm --prefix web run bench:usersource",
+    "verify:deploy": "./scripts/verify-deploy.sh",
+    "keys": "./scripts/setup-keys.sh",
+    "keys:check": "./scripts/check-keys.sh"
   }
 }

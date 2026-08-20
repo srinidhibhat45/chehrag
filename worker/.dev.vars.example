@@ -1,0 +1,28 @@
+# Copy to `worker/.dev.vars` (gitignored) to run the Worker locally with
+# `npm --prefix worker run dev`.
+#
+# You only need this if you are working on the Worker itself, or testing voice.
+# For the app's own development the generator key goes in `web/.env.local`
+# instead — the Vite dev server serves /synthesize and /health from the same
+# source file the Worker uses, so `npm run dev` alone gives real answers.
+#
+# In production these are set with `wrangler secret put NAME`, never committed.
+
+# --- the generator: pick one --------------------------------------------
+# Free and the fastest available. https://console.groq.com/keys
+GROQ_API_KEY=
+
+# Paid; better when an answer has to combine several passages.
+# ANTHROPIC_API_KEY=
+
+# Any other OpenAI-compatible endpoint, including a local one (no key needed).
+# LLM_BASE_URL=
+# LLM_API_KEY=
+# LLM_MODEL=
+
+# --- voice: Worker-only, because a browser cannot do either --------------
+# Speech in, and speech out for the Indic languages ElevenLabs does not cover.
+SARVAM_API_KEY=
+
+# Spoken answers in English, Hindi and Tamil.
+ELEVENLABS_API_KEY=

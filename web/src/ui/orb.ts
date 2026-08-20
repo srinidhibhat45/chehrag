@@ -10,8 +10,8 @@
  *   2. **In-thread WebGL.** For browsers with WebGL2 but no `OffscreenCanvas`
  *      transfer (Safari was late here, and some privacy extensions block worker
  *      construction outright). Here the renderer is explicitly *stopped* for the
- *      duration of every measured query — see `freeze()`/`thaw()` — so a
- *      fallback path can never quietly inflate the numbers.
+ *      duration of every measured query — see `freeze()`/`thaw()` — on both
+ *      the worker and the inline path, so neither can inflate the numbers.
  *   3. **No WebGL at all.** A CSS ember, static. It carries state through colour
  *      only. Nothing breaks.
  *
@@ -182,12 +182,19 @@ export class Orb {
     if (this.frozen) return;
     this.frozen = true;
     if (this.mode === "inline") this.inline?.stop();
+    // Also paused on the worker path. Off the main thread is not the same as
+    // free: the worker still wants a core and the GPU, and a query racing the
+    // fire for either is a query that can miss its budget on hardware slower
+    // than the one this was written on.
+    else if (this.mode === "worker") this.worker?.postMessage({ type: "freeze", on: true });
   }
 
   thaw(): void {
     if (!this.frozen) return;
     this.frozen = false;
-    if (this.mode === "inline" && !document.hidden) this.inline?.start();
+    if (document.hidden) return;
+    if (this.mode === "inline") this.inline?.start();
+    else if (this.mode === "worker") this.worker?.postMessage({ type: "freeze", on: false });
   }
 
   /** True when the fire genuinely costs the query path nothing. */

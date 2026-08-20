@@ -1,6 +1,11 @@
 name = "chehrag-worker"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
+# Only the optional Anthropic transport needs Node built-ins, and it is imported
+# dynamically so the default Groq path never loads it. The flag is here so that
+# path still works if someone sets ANTHROPIC_API_KEY, rather than failing at the
+# first request with a module-resolution error.
+compatibility_flags = ["nodejs_compat"]
 
 # The only server-side component, and nothing it does is on the latency path.
 # It exists for three things a browser is not permitted to do:
@@ -9,13 +14,21 @@ compatibility_date = "2026-08-01"
 #                             (browsers cannot set headers on a WS handshake)
 #   /tts                      hold the ElevenLabs and Sarvam keys off the client
 #   /fetch-url                read the body of a cross-origin page
-#   /synthesize               hold the Anthropic key off the client
+#   /synthesize               hold the generator's key off the client
 #
 # Secrets are set out-of-band, never committed:
+#   wrangler secret put GROQ_API_KEY          writes the answers. Free tier,
+#                                             ~1000 tok/s. Without a generator
+#                                             the app quotes the matching
+#                                             passage instead of answering.
 #   wrangler secret put SARVAM_API_KEY        speech in, and speech out for the
 #                                             8 Indic languages ElevenLabs lacks
 #   wrangler secret put ELEVENLABS_API_KEY    spoken answers (English/Hindi/Tamil)
-#   wrangler secret put ANTHROPIC_API_KEY     (optional — LLM rewrite only)
+#
+# Alternatives to GROQ_API_KEY, in the order synthesize.ts resolves them:
+#   ANTHROPIC_API_KEY                         paid; better at reasoning across
+#                                             several passages
+#   LLM_BASE_URL + LLM_MODEL (+ LLM_API_KEY)  any OpenAI-compatible endpoint
 #
 # Optional: pin a specific ElevenLabs voice. Defaults to a stock voice so a
 # fresh deploy needs no voice setup at all.
@@ -26,7 +39,7 @@ compatibility_date = "2026-08-01"
 # development and wrong for production: /fetch-url makes outbound requests, so
 # an open CORS policy lets any site use your Worker as a fetch proxy on your
 # quota.
-ALLOWED_ORIGIN = "*"
+ALLOWED_ORIGIN = "https://chehrag.pages.dev,https://a3bf12dd.chehrag.pages.dev"
 
 [observability]
 enabled = true

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "bench:multilingual": "tsx bench/multilingual.ts",
     "bench:gates": "tsx bench/gatetest.ts",
-    "bench:deadline": "tsx bench/deadline.ts"
+    "bench:deadline": "tsx bench/deadline.ts",
+    "bench:usersource": "tsx bench/usersource.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.7.6",
@@ -20,6 +21,7 @@
     "pdfjs-dist": "^6.2.108"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "tsx": "^4.20.7",
     "typescript": "^5.9.3",
     "vite": "^7.1.14"

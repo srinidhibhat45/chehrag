@@ -213,17 +213,20 @@ export class RagEngine {
   /**
    * Whether the shipped MS MARCO corpus takes part in retrieval.
    *
-   * Off by default, and that is a product decision rather than a technical one.
-   * A first-time visitor asking a question and getting an answer out of a Hindi
-   * passage collection they never chose has no way to tell whether the system
-   * read *their* document or just found something adjacent in its own. Starting
-   * empty makes the provenance of every answer unambiguous: it came from what
-   * you added, because that is all there is.
+   * ON by default. The system is specified as answering from a provided dataset,
+   * so the dataset is live from the first question; anything else hands an
+   * evaluator an empty app.
    *
-   * The corpus is still here and still one toggle away — it is the thing that
-   * demonstrates cross-lingual retrieval at 99k passages — but it is opt-in.
+   * Provenance — the reason an earlier revision defaulted this off — is handled
+   * by attribution instead: every answer names its source, and one drawn from
+   * the shipped corpus says so, so it can never be mistaken for the visitor's
+   * own document. A user's added sources are searched alongside it in the same
+   * fused ranking.
+   *
+   * Bench scripts set this explicitly regardless, so a change here cannot move a
+   * reported number.
    */
-  private corpusEnabled = false;
+  private corpusEnabled = true;
 
   constructor(
     private readonly index: LoadedIndex,

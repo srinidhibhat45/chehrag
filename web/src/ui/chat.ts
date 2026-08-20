@@ -7,11 +7,25 @@
  * was not, this one took 6 ms and that one 40 — and a panel that replaces
  * itself destroys the only evidence a person has for judging it.
  *
+ * WHAT AN ANSWER IS, HERE. The bubble holds a written answer to the question:
+ * "You are 45", not the line of the CV that says so. Under it, always visible
+ * and never behind a disclosure triangle, is the document that answer came
+ * from. Those two things together are the product. The retrieved passages are
+ * still one click away underneath, because a claim about a document should be
+ * checkable against the document — but they are evidence, not the answer, and
+ * the previous version of this file had them the other way around.
+ *
  * The latency reading rides with the answer it describes, as a small chip in
  * the message footer. It used to be a whole screen of its own, which had the
  * pathology of any dedicated metrics tab: the number was somewhere you had to
  * go and look, at which point it was no longer attached to the thing it was a
  * fact about. Expanded, the chip shows the per-stage breakdown inline.
+ *
+ * Retrieval time and generation time are shown as two numbers, never summed.
+ * The 200 ms guarantee is about retrieval, which runs here in the browser; the
+ * answer is written by a model over the network and takes as long as it takes.
+ * One combined figure would either break a promise the system actually keeps or
+ * hide a cost the person is actually paying.
  *
  * Everything is built with DOM calls rather than innerHTML. Passage text is
  * corpus data and user-supplied document text, and the one interesting way to
@@ -40,12 +54,23 @@ const REFUSAL_HINT: Record<string, string> = {
 };
 
 export interface BotHandle {
-  /** Replace the placeholder with a finished answer. */
-  resolve(r: RagAnswer, opts: { userChunks: number; truncated: boolean }): void;
-  /** Attach the LLM rewrite, once it has passed the grounding gate. */
-  polish(text: string): void;
+  /** Replace the placeholder with the outcome of retrieval. */
+  resolve(r: RagAnswer, opts: { userChunks: number; truncated: boolean; generating: boolean }): void;
+  /** First token of a generated answer has arrived — clear the waiting state. */
+  beginGeneration(): void;
+  /** Append a fragment of the generated answer. */
+  streamDelta(text: string): void;
+  /** Generation finished and passed the grounding gate. */
+  endGeneration(ms: number): void;
+  /**
+   * Generation did not produce a usable answer. `note` says why in the user's
+   * terms; the retrieved passage is shown instead, labelled as a quotation.
+   */
+  fallBackToExtract(note: string): void;
   /** Show which voice spoke, or why none did. */
   setVoice(label: string): void;
+  /** Whatever text is currently being presented as the answer. */
+  currentAnswer(): string;
   readonly el: HTMLElement;
 }
 
@@ -101,28 +126,86 @@ export class Chat {
     this.thread.append(msg);
     this.scroll();
 
+    // Captured on resolve so the generation callbacks below can reach the
+    // pieces they need to update without re-querying the DOM each token.
+    let answerEl: HTMLElement = text;
+    let extractive = "";
+    let generated = "";
+    let streaming = false;
+    let metaEl: HTMLElement | null = null;
+
+    /** The Speak control only appears once there is a settled answer to speak. */
+    const addSpeakButton = () => {
+      if (!metaEl || metaEl.querySelector(".speak-btn")) return;
+      const speak = metaButton("Speak");
+      speak.classList.add("speak-btn");
+      speak.addEventListener("click", () =>
+        this.hooks.onSpeak(generated || extractive, speak));
+      metaEl.append(speak);
+    };
+
     return {
       el: msg,
+      currentAnswer: () => generated || extractive,
+
       resolve: (r, opts) => {
         msg.dataset.status = r.status;
+        extractive = r.answer;
         body.replaceChildren();
-        this.renderAnswer(body, r, opts);
+        const parts = this.renderAnswer(body, r, opts);
+        answerEl = parts.answerEl;
+        metaEl = parts.metaEl;
+        if (r.status === "answered" && !opts.generating) addSpeakButton();
         this.scroll();
       },
-      polish: (t) => {
-        const p = div("polish");
-        const label = div("polish-label");
-        label.append(
-          txt("Rewritten by the language model"),
-          el("em", " after the fast answer, off the clock"),
-        );
-        const para = document.createElement("p");
-        para.className = "polish-text";
-        para.textContent = t;
-        p.append(label, para);
-        body.append(p);
+
+      beginGeneration: () => {
+        streaming = true;
+        generated = "";
+        answerEl.replaceChildren();
+        answerEl.dataset.state = "streaming";
         this.scroll();
       },
+
+      streamDelta: (t) => {
+        if (!streaming) return;
+        generated += t;
+        answerEl.textContent = generated;
+        this.scroll();
+      },
+
+      endGeneration: (ms) => {
+        streaming = false;
+        delete answerEl.dataset.state;
+        answerEl.textContent = generated.trim();
+        if (metaEl) {
+          const chip = el("span", `${Math.round(ms)} ms answer`, "gen-ms");
+          chip.title =
+            "Time for the model to write the answer. Separate from the retrieval " +
+            "figure beside it, which is the part of this system that carries the " +
+            "200 ms guarantee.";
+          metaEl.insertBefore(chip, metaEl.querySelector(".meta-btn"));
+        }
+        addSpeakButton();
+        this.scroll();
+      },
+
+      fallBackToExtract: (note) => {
+        streaming = false;
+        generated = "";
+        delete answerEl.dataset.state;
+        answerEl.textContent = extractive;
+        // Marked as a quotation rather than dressed up as an answer. Showing a
+        // raw passage without saying it is one is the exact failure this whole
+        // change exists to undo — it just fails silently instead of loudly.
+        answerEl.dataset.quoted = "1";
+        const why = div("answer-note");
+        why.textContent = note;
+        answerEl.after(why);
+        addSpeakButton();
+        this.scroll();
+      },
+
       setVoice: (label) => {
         let note = body.querySelector<HTMLElement>(".meta-note");
         if (!note) {
@@ -154,13 +237,22 @@ export class Chat {
   private renderAnswer(
     body: HTMLElement,
     r: RagAnswer,
-    opts: { userChunks: number; truncated: boolean },
-  ): void {
+    opts: { userChunks: number; truncated: boolean; generating: boolean },
+  ): { answerEl: HTMLElement; metaEl: HTMLElement | null } {
     const answered = r.status === "answered";
 
     const text = document.createElement("p");
     text.className = "answer-text";
-    text.textContent = r.answer;
+    if (answered && opts.generating) {
+      // Retrieval is done and generation has not produced a token yet. Saying
+      // "Reading…" is true — the passages exist and are being read — and it
+      // avoids the alternative of flashing the raw passage on screen for half a
+      // second before replacing it with the answer.
+      text.textContent = "Reading your sources…";
+      text.dataset.state = "waiting";
+    } else {
+      text.textContent = r.answer;
+    }
     body.append(text);
 
     if (!answered && r.refusal) {
@@ -171,64 +263,69 @@ export class Chat {
 
     // Nothing was searched, so there is nothing to time, cite or speak. A
     // stopwatch here would be advertising speed for doing no work.
-    if (r.refusal === "NO_SOURCES") return;
+    if (r.refusal === "NO_SOURCES") return { answerEl: text, metaEl: null };
+
+    // -- attribution -------------------------------------------------------
+    //
+    // Above the metadata row and outside any disclosure, because "which
+    // document told you that" is not a diagnostic — it is half of what makes
+    // an answer usable. It doubles as the control that opens the passages.
+    let cites: HTMLElement | null = null;
+    if (r.citations.length) {
+      cites = this.citesPanel(r);
+      cites.hidden = true;
+
+      const attrib = document.createElement("button");
+      attrib.className = "answer-source";
+      attrib.type = "button";
+      attrib.setAttribute("aria-expanded", "false");
+      attrib.append(txt("from "));
+      for (const node of sourceLabels(r)) attrib.append(node);
+      attrib.append(el("span", r.citations.length === 1 ? "1 passage" : `${r.citations.length} passages`, "src-count"));
+      attrib.addEventListener("click", () => {
+        const open = cites!.hidden;
+        cites!.hidden = !open;
+        attrib.setAttribute("aria-expanded", String(open));
+      });
+      body.append(attrib);
+    }
 
     const meta = div("msg-meta");
     body.append(meta);
 
-    // -- the speed chip ----------------------------------------------------
+    // -- the retrieval stopwatch -------------------------------------------
     const within = r.totalMs < 200;
     const speed = document.createElement("button");
     speed.className = "speed";
     speed.type = "button";
     speed.dataset.over = within ? "0" : "1";
     speed.setAttribute("aria-expanded", "false");
-    speed.append(txt(r.totalMs.toFixed(1)), el("span", "ms", "speed-unit"));
+    speed.append(
+      txt(r.totalMs.toFixed(1)),
+      el("span", "ms", "speed-unit"),
+      el("span", "retrieval", "speed-what"),
+    );
     speed.title = within
-      ? `${r.totalMs.toFixed(1)} ms of the 200 ms budget — ${(200 / Math.max(r.totalMs, 0.01)).toFixed(0)}x headroom. Click for the stage breakdown.`
-      : `${r.totalMs.toFixed(1)} ms — over the 200 ms budget.`;
+      ? `${r.totalMs.toFixed(1)} ms of the 200 ms budget to find the passages — ${(200 / Math.max(r.totalMs, 0.01)).toFixed(0)}x headroom. Click for the stage breakdown.`
+      : `${r.totalMs.toFixed(1)} ms — over the 200 ms retrieval budget.`;
     meta.append(speed);
 
     const stagesPanel = this.stagesPanel(r, opts);
     stagesPanel.hidden = true;
-    body.append(stagesPanel);
     speed.addEventListener("click", () => {
       const open = stagesPanel.hidden;
       stagesPanel.hidden = !open;
       speed.setAttribute("aria-expanded", String(open));
     });
 
-    // -- citations ---------------------------------------------------------
-    if (r.citations.length) {
-      const cites = this.citesPanel(r);
-      cites.hidden = true;
-      const btn = metaButton(
-        `${r.citations.length} source${r.citations.length === 1 ? "" : "s"}`,
-      );
-      btn.setAttribute("aria-expanded", "false");
-      btn.addEventListener("click", () => {
-        const open = cites.hidden;
-        cites.hidden = !open;
-        btn.setAttribute("aria-expanded", String(open));
-      });
-      meta.append(btn);
-      body.append(cites);
+    if (!answered && INPUT_GATE_REFUSALS.has(r.refusal ?? "")) {
+      meta.append(el("div", "stopped at the input gate — no embedding spent", "meta-note"));
     }
 
-    if (answered) {
-      // The raw confidence used to be printed here. It is the number the
-      // refusal gate is thresholded on, so it is real — but "conf 0.569" asks
-      // the reader to know what good looks like, and nothing on the page tells
-      // them. It survives where it means something: as the score on each
-      // retrieved passage, next to the passage it scores.
-      const speak = metaButton("Speak");
-      speak.addEventListener("click", () => this.hooks.onSpeak(r.answer, speak));
-      meta.append(speak);
-    } else if (INPUT_GATE_REFUSALS.has(r.refusal ?? "")) {
-      const n = div("meta-note");
-      n.textContent = "stopped at the input gate — no embedding spent";
-      meta.append(n);
-    }
+    body.append(stagesPanel);
+    if (cites) body.append(cites);
+
+    return { answerEl: text, metaEl: meta };
   }
 
   /**
@@ -285,7 +382,7 @@ export class Chat {
     if (opts.userChunks) parts.push(`${opts.userChunks.toLocaleString()} of your chunks scanned`);
     if (opts.truncated) parts.push("user-source scan hit its cap");
     if (r.plan.degraded && r.plan.reason) parts.push(r.plan.reason);
-    parts.push("retrieval only — speech and LLM rewrite are off this clock");
+    parts.push("retrieval only — writing the answer, and speech, are off this clock");
     const note = document.createElement("p");
     note.className = "meter-plan";
     note.textContent = parts.join(" · ");
@@ -296,16 +393,13 @@ export class Chat {
 
   private citesPanel(r: RagAnswer): HTMLElement {
     const panel = div("cites-panel");
+    panel.append(el("p", "The passages the answer was written from.", "cites-lede"));
     for (const c of r.citations) {
       const cell = div("cite");
       if (c.source.kind === "user") cell.dataset.user = "1";
 
       const meta = div("cite-meta");
-      if (c.source.kind === "user") {
-        const badge = el("span", c.source.title ?? "your source", "src-badge");
-        badge.title = c.source.title ?? "";
-        meta.append(badge);
-      }
+      meta.append(el("span", sourceLabel(c.source), "src-badge"));
       for (const s of c.strategies) meta.append(el("span", s, "tag"));
       meta.append(el("span", c.score.toFixed(4), "cite-score"));
 
@@ -336,6 +430,39 @@ export class Chat {
       this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight < 220;
     if (nearBottom) this.thread.scrollTop = this.thread.scrollHeight;
   }
+}
+
+// -- attribution helpers -----------------------------------------------------
+
+/**
+ * Named, not described. "the sample corpus" tells a reader nothing they can
+ * check; the dataset has a name and citing it is the point of a citation.
+ */
+function sourceLabel(s: { kind: "corpus" | "user"; title?: string }): string {
+  return s.kind === "user" ? (s.title || "your source") : "MS MARCO-XI";
+}
+
+/**
+ * The document names behind an answer, de-duplicated in rank order.
+ *
+ * Named rather than counted: "from biodata.pdf" is a fact someone can act on,
+ * "from 3 sources" is a number. Past two documents it becomes a count anyway,
+ * because a line of six filenames is no longer a sentence.
+ */
+function sourceLabels(r: RagAnswer): Node[] {
+  const seen: string[] = [];
+  for (const c of r.citations) {
+    const label = sourceLabel(c.source);
+    if (!seen.includes(label)) seen.push(label);
+  }
+  const out: Node[] = [];
+  const shown = seen.slice(0, 2);
+  shown.forEach((label, i) => {
+    if (i > 0) out.push(txt(seen.length > 2 ? ", " : " and "));
+    out.push(el("span", label, "src-name"));
+  });
+  if (seen.length > 2) out.push(txt(` and ${seen.length - 2} more`));
+  return out;
 }
 
 // -- tiny DOM helpers --------------------------------------------------------

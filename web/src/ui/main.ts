@@ -10,10 +10,16 @@
  *   reports, and it is the only thing that chip reports.
  *
  *   SLOW PATH (unmeasured, best effort) — Sarvam speech-to-text before the
- *   question exists, ElevenLabs or Sarvam speech after the answer already
- *   exists, and the LLM rewrite after that. None of it may touch the measured
- *   span, and none of it is allowed to be a precondition for answering: with
- *   the Worker unreachable, typed questions still answer at full speed.
+ *   question exists, the model that writes the answer from the retrieved
+ *   passages, and ElevenLabs or Sarvam speech after that. None of it may touch
+ *   the measured span.
+ *
+ * Writing the answer is on the slow path and is *not* optional to the product,
+ * only to the guarantee. When no generator is configured the app still works —
+ * it shows the passage that answers the question, labelled as a quotation
+ * rather than dressed up as an answer — but that is a degraded mode and the
+ * interface says so. The 200 ms number describes retrieval, is measured on
+ * retrieval alone, and is reported next to a separate figure for the answer.
  *
  * The status dots in the top bar are load-bearing for honesty. They report what
  * the Worker says it actually has keys for, so the interface never claims a
@@ -30,6 +36,7 @@ import { Chat, type BotHandle } from "./chat";
 import { Orb } from "./orb";
 import { pickStt, sttAvailability, type SttEngine, type SttKind } from "../stt";
 import { Speaker, scriptLanguage, type TtsProvider } from "../tts/speak";
+import { generate, DEFAULT_GEN_CONFIG, type GenSource } from "../answer/generate";
 
 const WORKER_BASE = import.meta.env.VITE_WORKER_BASE ?? "";
 
@@ -81,7 +88,25 @@ $("theme-btn").addEventListener("click", () => {
 const CORPUS_KEY = "chehrag-corpus";
 
 /** Opt-in, and remembered. Absent means off — a first visit starts empty. */
-function corpusPref(): boolean { return localStorage.getItem(CORPUS_KEY) === "1"; }
+/**
+ * Is the provided MS MARCO-XI dataset searchable?
+ *
+ * ON by default, and the default is the requirement. The brief is "retrieves
+ * relevant context from a provided dataset" — so the dataset has to be live the
+ * moment the page opens. An evaluator who asks the first question and is told to
+ * add a source first has been shown an empty app, whatever it could have done.
+ *
+ * An earlier revision started empty on provenance grounds: an answer out of a
+ * 98,867-passage collection the visitor never chose is indistinguishable, to
+ * them, from an answer out of their own document. That concern was real and is
+ * now handled where it belongs — every answer names the document it came from,
+ * and a corpus passage says so — rather than by disabling the dataset the system
+ * exists to search.
+ *
+ * Reads `!== "0"` rather than `=== "1"`: an explicit opt-out is remembered, an
+ * absent preference means on.
+ */
+function corpusPref(): boolean { return localStorage.getItem(CORPUS_KEY) !== "0"; }
 
 function setCorpus(on: boolean): void {
   localStorage.setItem(CORPUS_KEY, on ? "1" : "0");
@@ -102,14 +127,17 @@ function syncSources(): void {
   const toggle = $<HTMLButtonElement>("corpus-toggle");
   toggle.setAttribute("aria-pressed", String(on));
   toggle.setAttribute("aria-label",
-    on ? "Stop searching the Hindi sample set" : "Search the Hindi sample set");
+    on ? "Stop searching MS MARCO-XI" : "Search MS MARCO-XI");
 
   // The sample questions are questions about the Hindi corpus. Offering them
   // while it is switched off would be offering a button that cannot work.
   const suggest = document.getElementById("suggest");
   if (suggest) suggest.hidden = !on;
+  // The hint now offers *adding* a document rather than switching the dataset
+  // on, so it is shown while the corpus is live and hidden once the visitor has
+  // taken it up.
   const hint = document.getElementById("welcome-hint");
-  if (hint) hint.hidden = on || !!store?.hasEnabled;
+  if (hint) hint.hidden = !!store?.hasEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +185,50 @@ function wireLangs(): void {
 function askLang(): string { return $<HTMLSelectElement>("lang-sel").value; }
 
 // ---------------------------------------------------------------------------
+// the two halves of voice
+// ---------------------------------------------------------------------------
+
+/**
+ * Are answers read aloud?
+ *
+ * On by default, and it applies to every question rather than only to spoken
+ * ones. Speech is the output this is built around; making it conditional on
+ * how the question arrived meant a typed question demonstrated half the
+ * product. The keyboard is a way in, not a different mode.
+ */
+let speakOn = localStorage.getItem("chehrag-speak") !== "0";
+
+function setSpeak(on: boolean): void {
+  speakOn = on;
+  localStorage.setItem("chehrag-speak", on ? "1" : "0");
+  const btn = $<HTMLButtonElement>("speak-btn");
+  btn.setAttribute("aria-pressed", String(on));
+  btn.setAttribute("aria-label", on ? "Stop reading answers aloud" : "Read answers aloud");
+  $("speak-label").textContent = on ? "Answers spoken" : "Answers silent";
+  if (!on) speaker.stop();
+  updateVoiceNote();
+}
+
+/**
+ * Show the keyboard.
+ *
+ * Hidden until asked for, because a text field next to a microphone is the
+ * thing people reach for out of habit, and reaching for it here means never
+ * finding out that speaking works. Once opened it stays open for the session —
+ * someone who has chosen to type should not have to choose again per question.
+ */
+function setTyping(on: boolean): void {
+  const stage = $("stage");
+  if (stage.dataset.typing === (on ? "1" : "0")) return;
+  stage.dataset.typing = on ? "1" : "0";
+  $<HTMLFormElement>("ask-form").hidden = !on;
+  const btn = $<HTMLButtonElement>("type-btn");
+  btn.setAttribute("aria-expanded", String(on));
+  $("type-label").textContent = on ? "Hide the keyboard" : "Type instead";
+  if (on && app.dataset.stage !== "boot") $<HTMLInputElement>("q").focus();
+}
+
+// ---------------------------------------------------------------------------
 // service status
 // ---------------------------------------------------------------------------
 
@@ -183,20 +255,24 @@ async function probeWiring(): Promise<void> {
   const local = sttAvailability(WORKER_BASE);
   wiring.sttBrowser = local.browser;
 
-  if (WORKER_BASE) {
-    try {
-      const r = await fetch(`${WORKER_BASE}/health`);
-      const h = await r.json() as {
-        stt?: { sarvam?: boolean };
-        tts?: { elevenlabs?: boolean; sarvam?: boolean };
-        llm?: boolean;
-      };
-      wiring.sttSarvam = !!h.stt?.sarvam;
-      wiring.ttsEleven = !!h.tts?.elevenlabs;
-      wiring.ttsSarvam = !!h.tts?.sarvam;
-      wiring.llm = !!h.llm;
-    } catch { /* Worker unreachable — everything stays off */ }
-  }
+  // Probed unconditionally, not only when `VITE_WORKER_BASE` is set. With no
+  // Worker configured this is a same-origin request, which is exactly what the
+  // dev server answers — that is what lets `npm run dev` produce real answers
+  // from a key in `web/.env.local` with no Cloudflare account involved. In
+  // production without a Worker the SPA fallback returns HTML, `json()` throws,
+  // and everything correctly stays off.
+  try {
+    const r = await fetch(`${WORKER_BASE}/health`);
+    const h = await r.json() as {
+      stt?: { sarvam?: boolean };
+      tts?: { elevenlabs?: boolean; sarvam?: boolean };
+      llm?: boolean;
+    };
+    wiring.sttSarvam = !!h.stt?.sarvam;
+    wiring.ttsEleven = !!h.tts?.elevenlabs;
+    wiring.ttsSarvam = !!h.tts?.sarvam;
+    wiring.llm = !!h.llm;
+  } catch { /* no generator reachable — everything stays off */ }
   await speaker.probe();
   renderWiring();
 }
@@ -212,16 +288,19 @@ async function probeWiring(): Promise<void> {
  * where it changes what someone would do, and nowhere else.
  */
 function renderWiring(): void {
-  // Never before the index is up: an enabled mic on a booting app records a
+  // Never before the index is up: a live lamp on a booting app records a
   // question there is nothing to answer with.
-  $<HTMLButtonElement>("mic-btn").disabled = !micReady() || app.dataset.stage === "boot";
+  $<HTMLButtonElement>("orb").disabled = app.dataset.stage === "boot";
+  // Speech is the primary path, so its absence is a fact about the stage
+  // rather than a disabled button: the keyboard opens and stays open.
+  $("stage").dataset.mic = micReady() ? "1" : "0";
+  if (!micReady() && app.dataset.stage !== "boot") setTyping(true);
   updateVoiceNote();
 }
 
 function updateVoiceNote(): void {
-  const sel = $<HTMLSelectElement>("voice-sel");
   const parts: string[] = [];
-  if (sel.value === "off") {
+  if (!speakOn) {
     parts.push("Answers are not spoken.");
   } else {
     const lang = askLang() === "auto" ? "hi-IN" : askLang();
@@ -250,6 +329,9 @@ function updateVoiceNote(): void {
 async function boot(): Promise<void> {
   const t0 = performance.now();
   wireLangs();
+  // Before the probe, so a remembered "answers silent" is on screen from the
+  // first frame rather than after the index finishes downloading.
+  setSpeak(speakOn);
   void probeWiring();
   checkIsolation();
 
@@ -322,15 +404,19 @@ async function boot(): Promise<void> {
   app.dataset.stage = "idle";
   $<HTMLInputElement>("q").disabled = false;
   $<HTMLButtonElement>("go").disabled = false;
-  $<HTMLButtonElement>("mic-btn").disabled = !(wiring.sttSarvam || wiring.sttBrowser);
+  renderWiring();
 
   orb.set("idle", "Ready", micReady()
-    ? "tap the lamp, or the mic, and ask"
-    : "no microphone available — typing works");
-  $("composer-note").textContent = orb.offMainThread
-    ? "Searched in this browser. The lamp draws on its own thread, so it costs a question nothing."
-    : "Searched in this browser. The lamp holds still while a question is timed.";
-  $<HTMLInputElement>("q").focus();
+    ? "tap the lamp, or press space, and speak"
+    : "no microphone here — the keyboard is open below");
+  // Both paths now hold the fire still while a question is timed, so the note
+  // no longer needs to distinguish them — and claiming the worker "costs a
+  // question nothing" was true of main-thread time and not of a contended core.
+  $("composer-note").textContent =
+    "Searched in this browser. The lamp holds still while a question is timed.";
+  // Deliberately not focusing the text field: it is hidden, and focusing the
+  // lamp instead means the first Enter or Space starts listening.
+  if (micReady()) $<HTMLButtonElement>("orb").focus();
 }
 
 function micReady(): boolean { return wiring.sttSarvam || wiring.sttBrowser; }
@@ -369,6 +455,9 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
   asking = true;
   $<HTMLInputElement>("q").value = "";
   $("transcript").hidden = true;
+  // The lamp is the hero of an empty room and an oversized one above a
+  // conversation. It shrinks the moment there is something to read.
+  app.dataset.asked = "1";
 
   chat.addUser(q, opts.voice);
   const handle = chat.addPending();
@@ -386,32 +475,58 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
 
     const res = await engine.ask(q, { skipCache: true });
 
+    const answered = res.status === "answered";
+    // Generation is attempted whenever retrieval succeeded and a generator is
+    // configured. `generating: true` tells the message to hold a waiting state
+    // instead of painting the retrieved passage — which would otherwise flash
+    // on screen for a moment and then be replaced by the real answer.
+    const willGenerate = answered && wiring.llm;
+
     handle.resolve(res, {
       userChunks: store?.activeChunks ?? 0,
       truncated: store?.truncated ?? false,
+      generating: willGenerate,
     });
     // Only questions that were actually searched belong in the session figures.
     // A refusal for want of a source never reached the encoder, and folding its
     // 0.1 ms into the readout would flatter every number in it.
+    //
+    // Generation time is deliberately excluded too. This readout is the
+    // retrieval guarantee's own instrument; mixing a network round trip into it
+    // would make the one number this project is graded on meaningless.
     if (res.refusal !== "NO_SOURCES") {
       sessionTimes.push(res.totalMs);
       renderSessionStats();
     }
 
-    const answered = res.status === "answered";
     orb.set(answered ? "answered" : "refused", answered ? "Answered" : "Declined", "");
 
     // Refusing for want of a source and leaving the user to find the Add
     // button themselves is a dead end. Put the panel in front of them.
     if (res.refusal === "NO_SOURCES") openAddPanel();
 
-    if (answered && $<HTMLSelectElement>("voice-sel").value !== "off" && opts.voice) {
-      // Spoken questions get spoken answers without being asked twice; typed
-      // ones get a button, because someone typing in an office did not ask for
-      // audio.
-      void speakAnswer(res.answer, null, handle);
+    // Speaking waits for the written answer. Reading a raw passage aloud is
+    // worse than reading a sentence aloud, and the whole point of generating is
+    // that there is now a sentence.
+    //
+    // It no longer depends on `opts.voice`. Answers are spoken because speech
+    // is the output, not as a reply in kind to a spoken question — a typed
+    // question used to get a silent answer, which showed half the product to
+    // anyone who reached for the keyboard first.
+    const speakWhenReady = answered && speakOn;
+
+    if (willGenerate) {
+      void writeAnswer(q, res, handle, speakWhenReady);
+    } else if (answered) {
+      // No generator configured. The passage still answers the question, but it
+      // is a passage — presenting it as though the system had written it is the
+      // exact thing this release exists to stop doing, and it does not become
+      // acceptable just because the reason is a missing key.
+      handle.fallBackToExtract(
+        "No answer writer is configured, so this is the passage that matched — quoted, not answered.",
+      );
+      if (speakWhenReady) void speakAnswer(res.answer, null, handle);
     }
-    if (answered && wiring.llm) void synthesize(q, res, handle);
   } catch (err) {
     chat.addNotice(`Something went wrong: ${err instanceof Error ? err.message : String(err)}`);
     orb.set("refused", "Failed", "");
@@ -426,28 +541,87 @@ function renderSessionStats(): void {
   if (!sessionTimes.length) return;
   const p = percentiles(sessionTimes);
   $("stat-p50").textContent = p.p50.toFixed(1);
+  $("stat-p70").textContent = p.p70.toFixed(1);
   $("stat-p100").textContent = p.p100.toFixed(1);
   $("stat-n").textContent = String(sessionTimes.length);
 }
 
-/** Off the fast path. Verified against retrieved context before display. */
-async function synthesize(query: string, base: RagAnswer, handle: BotHandle): Promise<void> {
-  try {
-    const data = await llmBreaker.call(async () => {
-      const res = await fetch(`${WORKER_BASE}/synthesize`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query, contexts: base.citations.map((c) => c.text) }),
-      });
-      if (!res.ok) throw new Error(`synthesize ${res.status}`);
-      return res.json() as Promise<{ answer: string | null }>;
-    });
-    if (!data.answer) return;
-    // Gate 3: a fluent model can quietly add a fact that was never in the
-    // sources. If it drifted, we keep the extractive answer and say nothing.
-    if (!engine.verifySynthesis(data.answer, base.citations).pass) return;
-    handle.polish(data.answer);
-  } catch { /* worker down or circuit open — the extractive answer already stands */ }
+/**
+ * Write the answer.
+ *
+ * Off the measured path by construction — this is a network round trip to a
+ * model, and no amount of engineering makes that fit in 200 ms. What it is
+ * *not* is optional to the product: retrieval finds the passage that contains
+ * the answer, and this is the step that turns it into one. The name of the old
+ * version of this function was `synthesize`, and it appended its output under
+ * the raw passage as a "rewrite"; that framing is what let the app ship
+ * answering "what is my name" with the line of the CV rather than the name.
+ *
+ * Three ways it can end, all of them leaving something usable on screen:
+ *
+ *   answer         streamed into the bubble, then checked against the passages
+ *                  it came from (gate 3) before it is allowed to stand
+ *   insufficient   the model read the passages and said they do not answer the
+ *                  question — which is a refusal the retrieval gate did not
+ *                  catch, and is worth more than a confident wrong answer
+ *   unavailable    no key, worker down, timeout — the retrieved passage is
+ *                  shown instead, labelled as a quotation
+ */
+async function writeAnswer(
+  query: string,
+  base: RagAnswer,
+  handle: BotHandle,
+  speak: boolean,
+): Promise<void> {
+  const sources: GenSource[] = base.citations.map((c) => ({
+    title: c.source.kind === "user" ? (c.source.title ?? "your source") : "MS MARCO-XI",
+    text: c.text,
+  }));
+
+  let started = false;
+  const outcome = await llmBreaker.call(() =>
+    generate(query, sources, {
+      onDelta: (t) => {
+        if (!started) { started = true; handle.beginGeneration(); }
+        handle.streamDelta(t);
+      },
+    }, { ...DEFAULT_GEN_CONFIG, base: WORKER_BASE }),
+  ).catch((): { kind: "unavailable"; reason: string } => (
+    // The breaker is open after repeated failures. Not an error condition —
+    // it is the system declining to make a call it expects to fail.
+    { kind: "unavailable", reason: "generator unavailable" }
+  ));
+
+  if (outcome.kind === "answer") {
+    // Gate 3. A fluent model can add a fact that was never in the passages, and
+    // the one thing this product cannot do is state something the document does
+    // not. Checked after streaming rather than before, because holding the whole
+    // answer back to verify it would cost the entire benefit of streaming, and a
+    // rare retraction is cheaper than a universal delay.
+    if (engine.verifySynthesis(outcome.text, base.citations).pass) {
+      handle.endGeneration(outcome.ms);
+      if (speak) void speakAnswer(outcome.text, null, handle);
+      return;
+    }
+    handle.fallBackToExtract(
+      "I couldn't trace all of that back to your sources, so here's the passage it came from instead.",
+    );
+  } else if (outcome.kind === "insufficient") {
+    handle.fallBackToExtract(
+      "This is the closest thing I found, but I couldn't turn it into a direct answer to your question.",
+    );
+  } else {
+    // "Not configured" and "configured but not answering right now" are
+    // different facts about the user's setup, and telling them the first when
+    // the second is true sends them to check a key that is fine.
+    handle.fallBackToExtract(
+      outcome.reason === "no generator configured"
+        ? "No answer writer is set up, so this is the passage that matched — quoted, not answered."
+        : `I couldn't reach the answer writer (${outcome.reason}), so this is the passage that matched — quoted, not answered.`,
+    );
+  }
+
+  if (speak) void speakAnswer(handle.currentAnswer(), null, handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +684,7 @@ async function toggleMic(): Promise<void> {
     live.dataset.error = "1";
     live.textContent =
       "No speech input available. Set VITE_WORKER_BASE with a Sarvam key, or use a Chromium browser.";
+    setTyping(true);
     return;
   }
 
@@ -519,8 +694,8 @@ async function toggleMic(): Promise<void> {
   live.textContent = "Listening…";
   lastPartial = "";
   lastHeardLanguage = null;
-  orb.set("listening", "Listening", "tap again when you're done");
-  $("mic-btn").dataset.on = "1";
+  orb.set("listening", "Listening", "tap the lamp again when you're done");
+  $("stage").dataset.listening = "1";
 
   const picked = pickStt({
     workerBase: wiring.sttSarvam ? WORKER_BASE : "",
@@ -545,7 +720,13 @@ async function toggleMic(): Promise<void> {
       } else if (e.type === "error") {
         live.dataset.error = "1";
         live.textContent = e.message;
-        void stopMic();
+        // Back to Ready, not to "Looking…": nothing was heard, so nothing is
+        // being looked up. The caption is the app's status line now, and a
+        // search that is not happening is the wrong thing for it to claim.
+        void stopMic("idle");
+        // Speech just failed in front of them. Open the keyboard rather than
+        // leaving a lamp that has visibly stopped working as the only way in.
+        setTyping(true);
       }
     },
   });
@@ -571,20 +752,38 @@ async function toggleMic(): Promise<void> {
   } catch (err) {
     live.dataset.error = "1";
     live.textContent = `Microphone unavailable — ${err instanceof Error ? err.message : String(err)}`;
-    $("mic-btn").dataset.on = "0";
+    $("stage").dataset.listening = "0";
     orb.set("idle", "Ready", "");
+    // A refused microphone is the one case where the keyboard has to appear
+    // without being asked for: there is otherwise no way to ask anything.
+    setTyping(true);
   }
 }
 
-async function stopMic(): Promise<void> {
+async function stopMic(next: "thinking" | "idle" = "thinking"): Promise<void> {
   if (!recording && !stt) return;
   recording = false;
-  $("mic-btn").dataset.on = "0";
+  $("stage").dataset.listening = "0";
   orb.stopListening();
-  if (orb.current === "listening") orb.set("thinking", "Looking…", "");
+  if (orb.current === "listening") {
+    if (next === "thinking") orb.set("thinking", "Looking…", "");
+    else orb.set("idle", "Ready", "tap the lamp, or press space, and speak");
+  }
   const s = stt;
   stt = null;
   await s?.stop().catch(() => { /* already closed */ });
+
+  // A recogniser that is asked to stop is not obliged to emit a final. The
+  // browser one sometimes does not, and the caption would then sit on
+  // "Looking…" for a search that never started — which, now that the caption
+  // is the app's status line, is the lamp lying about what it is doing.
+  if (next === "thinking") {
+    setTimeout(() => {
+      if (!asking && !recording && orb.current === "thinking") {
+        orb.set("idle", "Ready", "tap the lamp, or press space, and speak");
+      }
+    }, 2500);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -606,16 +805,33 @@ $("q").addEventListener("keydown", (e) => {
   }
 });
 $("orb").addEventListener("click", () => void toggleMic());
-$("mic-btn").addEventListener("click", () => void toggleMic());
+
+/**
+ * Space is the microphone.
+ *
+ * A voice-first app whose only way in is a mouse target is not voice-first for
+ * anyone at a keyboard. Space is the obvious key and costs nothing, provided it
+ * yields to whatever already wants it: a focused field, a focused button (the
+ * browser's own activation already fires there), and a held key repeating.
+ */
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (app.dataset.stage === "boot" || !micReady()) return;
+  const el = document.activeElement as HTMLElement | null;
+  if (el && (el.isContentEditable
+    || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(el.tagName))) return;
+  e.preventDefault();
+  void toggleMic();
+});
+
 for (const chip of document.querySelectorAll<HTMLButtonElement>(".chip")) {
   chip.addEventListener("click", () => void ask(chip.dataset.q ?? ""));
 }
 $("corpus-toggle").addEventListener("click", () => setCorpus(!(engine?.corpusOn ?? false)));
-$("try-corpus").addEventListener("click", () => setCorpus(true));
-$("voice-sel").addEventListener("change", () => {
-  if ($<HTMLSelectElement>("voice-sel").value === "off") speaker.stop();
-  updateVoiceNote();
-});
+$("try-corpus").addEventListener("click", () => openAddPanel());
+$("speak-btn").addEventListener("click", () => setSpeak(!speakOn));
+$("type-btn").addEventListener("click",
+  () => setTyping($("stage").dataset.typing !== "1"));
 
 // -- add-a-source panel ------------------------------------------------------
 function openAddPanel(): void {

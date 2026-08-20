@@ -18,6 +18,8 @@
  * that split rather than guessed. See `bench/calibrate.ts`.
  */
 
+import { contentTokens, dominantScript, normaliseDigits } from "../retrieval/tokens";
+
 export type Refusal =
   | "EMPTY"
   | "TOO_SHORT"
@@ -313,11 +315,48 @@ export const DEFAULT_THRESHOLDS: ConfidenceThresholds = {
   minTopScore: 0.80,
   minAgreement: 2,
   minLexicalOverlap: 0.0,
-  // Fitted on 43 labelled questions over two English documents — a far smaller
-  // sample than the 3,012 that fitted `minTopScore`, and stated as such. The
-  // check that matters is the other direction: `bench/run.ts` measures what
-  // this costs on the corpus's own labelled unanswerable split.
-  rescueMinScore: 0.40,
+  /**
+   * Rescue floor, fitted on `bench/usersource.ts` — 39 labelled questions over
+   * a field-structured document and a prose one.
+   *
+   * It was 0.40, and that refused nearly half of everything a user document
+   * could actually answer:
+   *
+   *     rule            coverage        abstention
+   *     no rescue       40.0% (10/25)   100.0% (14/14)
+   *     floor 0.40      52.0% (13/25)   100.0% (14/14)   <- shipped
+   *     floor 0.30      76.0% (19/25)    92.9% (13/14)
+   *     floor 0.20      88.0% (22/25)    92.9% (13/14)   <- now
+   *     floor 0.15      88.0% (22/25)    92.9% (13/14)
+   *     floor 0.00      88.0% (22/25)    92.9% (13/14)
+   *
+   * 0.20 is chosen as the *highest* value on the coverage plateau rather than
+   * the lowest: everything from 0 to 0.20 scores identically, so the floor
+   * costs nothing there and still excludes the genuinely-unrelated band, where
+   * "what is the capital of Peru" scored 0.123 against this pair of documents.
+   * Picking the bottom of a plateau leaves a threshold doing no work at all.
+   *
+   * The one unanswerable question this now answers is "what is your VAT
+   * number" against a policy document that says "email support with your order
+   * number" — a real near-miss, and one the layer below catches: the model is
+   * instructed to return INSUFFICIENT_CONTEXT when the passages do not answer
+   * the question, and gate 3 checks what it produces. Three answerable
+   * questions are still refused ("what did he study", "which company did he
+   * work at", "where did he go to college"): pure semantic matches sharing no
+   * content word with the document, whose cosines (0.26–0.33) sit inside the
+   * unanswerable range (0.17–0.46). No threshold on these signals separates
+   * them, and refusing is the safe side of a case that cannot be called.
+   *
+   * `strategyAgreement` is deliberately not part of the rescue. It looked like
+   * the strongest scale-free signal available until it was measured: on user
+   * documents it is 4 for 37 of 39 questions, answerable and unanswerable
+   * alike, because a small document is fully covered by every chunking
+   * strategy. It discriminates on a 99k-passage corpus and not here.
+   *
+   * Applied to user-added sources only — `rag.ts` switches it off for corpus
+   * hits, which is the split `minTopScore` was fitted on.
+   */
+  rescueMinScore: 0.20,
   rescueMinOverlap: 0.5,
 };
 
@@ -355,44 +394,162 @@ export function gateRetrieval(
 // Gate 3 — grounding
 // ---------------------------------------------------------------------------
 
-function tokenSet(s: string): Set<string> {
-  return new Set(
-    s.toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 1),
-  );
-}
-
 /**
  * Fraction of the answer's content tokens that appear in the retrieved context.
  *
  * The extractive path is grounded by construction (it returns spans), so this
- * exists for the LLM-synthesised path, where a fluent model can quietly add a
- * fact that was never in the sources.
+ * exists for the generated path, where a fluent model can quietly add a fact
+ * that was never in the sources.
+ *
+ * "Content tokens" is now literally true. It counted every token, including
+ * function words, which penalised exactly the thing generation is for: turning
+ * a passage fragment into a sentence. "Your name is Srinidhi Bhat" against a
+ * passage reading `name: srinidhi bhat, age: 45` scored 3/5 = 0.60 — under the
+ * 0.62 threshold — because `your` and `is` are not in the passage and never
+ * could be. Every correctly-grounded rewrite was being discarded for the
+ * grammar it added. See `retrieval/tokens.ts`.
  */
 export function groundingScore(answer: string, contexts: string[]): number {
-  const a = tokenSet(answer);
+  const a = contentTokens(answer);
   if (!a.size) return 0;
   const ctx = new Set<string>();
-  for (const c of contexts) for (const w of tokenSet(c)) ctx.add(w);
+  for (const c of contexts) for (const w of contentTokens(c)) ctx.add(w);
   let hit = 0;
   for (const w of a) if (ctx.has(w)) hit++;
   return hit / a.size;
 }
 
+/**
+ * The specifics in a piece of text: the tokens a model would have to *invent*
+ * rather than merely phrase.
+ *
+ * A bag-of-words grounding score cannot tell "You are 45" from "You are 46" —
+ * they differ in one token out of three, which no threshold separates from the
+ * ordinary variation of writing a sentence. But that one token is the entire
+ * difference between a correct answer and a fabricated one, and the tokens like
+ * it are identifiable without any threshold at all: numbers, and names.
+ *
+ *   digits        an age, a date, an amount, a duration, a version
+ *   capitals      a person, a company, a place, a product
+ *
+ * Sentence-initial capitals are excluded, because "Your" in "Your name is…" is
+ * capitalised by grammar rather than by being a name. Scripts without letter
+ * case contribute numbers only, which is the honest limit of this test there —
+ * it is a check that fires when it is certain, not one that guesses in scripts
+ * it cannot read.
+ */
+function specifics(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const sentence of text.split(/(?<=[।.!?])\s+/)) {
+    const words = sentence.trim().split(/\s+/).filter(Boolean);
+    words.forEach((w, i) => {
+      const bare = w.replace(/[^\p{L}\p{N}]/gu, "");
+      if (bare.length < 2) return;
+      if (/\p{N}/u.test(bare)) { out.add(bare.toLowerCase()); return; }
+      // Not the first word of the sentence, and starts with a capital.
+      if (i > 0 && bare[0] !== bare[0].toLowerCase()) out.add(bare.toLowerCase());
+    });
+  }
+  return out;
+}
+
+/**
+ * Gate 3 — is the answer traceable to the passages it was written from?
+ *
+ * Two tests, doing two different jobs.
+ *
+ * THE HARD TEST is on specifics: every number and every name in the answer must
+ * appear in the retrieved text. There is no threshold here and there should not
+ * be one — a date the document does not contain is not 90% grounded, it is
+ * invented. This is the test that actually catches hallucination, and it is
+ * exact rather than statistical.
+ *
+ * THE SOFT TEST is a coverage floor on content words, and it is a backstop for
+ * wholesale topic drift — an answer written from the model's own knowledge
+ * using only generic vocabulary. It is set low *on purpose*.
+ *
+ * It used to be the only test, over every token including function words, at
+ * 0.62. That is a check on how much of the answer's grammar happens to appear
+ * in a document, and it rejected correct answers systematically:
+ *
+ *     "Your name is Srinidhi Bhat."   0.60 against `name: srinidhi bhat, …`
+ *     "You are 45 years old."         0.33 — "years" and "old" are not in a
+ *                                     document that writes `age: 45`
+ *
+ * Both are perfectly grounded. The first was rejected by two hundredths, and
+ * the second by a mile, for the sole offence of being written as English. A
+ * gate that fires on the difference between data and a sentence is a gate
+ * against the entire purpose of generating one.
+ */
 export function gateGrounding(
   answer: string,
   contexts: string[],
-  minScore = 0.62,
+  minCoverage = 0.34,
 ): GateResult {
-  const score = groundingScore(answer, contexts);
-  if (score < minScore) {
+  const joined = contexts.join(" ");
+
+  /**
+   * CROSS-LINGUAL ANSWERS CANNOT BE WORD-CHECKED, AND MUST NOT BE REFUSED FOR IT.
+   *
+   * This corpus is MS MARCO-XI: the passages are Hindi and the questions arrive
+   * in fourteen languages. Cross-lingual retrieval is the capability the dataset
+   * exists to exercise. But an English answer written from a Hindi passage
+   * shares no tokens with it at all — measured, this exact pair scored 0.000:
+   *
+   *   passage  निगमन एक नए निगम का गठन है (एक निगम एक कानूनी इकाई है …)
+   *   answer   "A corporation is a legal entity recognized as a person under law."
+   *
+   * Correct, faithful, and rejected — so every English question over this corpus
+   * silently fell back to showing raw Hindi. Word overlap between two scripts
+   * measures translation, not grounding, and a threshold on it is a threshold on
+   * the wrong quantity.
+   *
+   * This follows the rule the input gate already obeys: never judge text in a
+   * script you have no markers for — skip the test rather than default to
+   * refuse. What survives translation is *numbers*, so the digit half of the
+   * specifics check still runs, across numeral systems. Names usually
+   * transliterate rather than translate, so they are not checked here; claiming
+   * to verify them would be pretending to a measurement we cannot make.
+   */
+  const crossScript =
+    dominantScript(answer) !== dominantScript(joined) &&
+    dominantScript(answer) !== "unknown" &&
+    dominantScript(joined) !== "unknown";
+
+  const ctxRaw = new Set<string>();
+  for (const w of normaliseDigits(joined).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/)) {
+    if (w) ctxRaw.add(w);
+  }
+
+  const found = specifics(normaliseDigits(answer));
+  const checked = crossScript
+    ? [...found].filter((w) => /\d/.test(w))     // numbers only — they translate
+    : [...found];
+  const invented = checked.filter((w) => !ctxRaw.has(w));
+
+  if (invented.length) {
     return {
       pass: false,
       reason: "UNGROUNDED",
       message: "I drafted an answer but couldn't trace all of it back to my sources, so I'm not going to give it to you.",
-      detail: { groundingScore: +score.toFixed(3), threshold: minScore },
+      detail: { invented: invented.slice(0, 4).join(", ") },
+    };
+  }
+
+  if (crossScript) {
+    // Passed on what is checkable. Reported rather than hidden: this answer
+    // carries less verification than a same-script one, and the difference is
+    // a fact about the answer.
+    return { pass: true, detail: { crossScript: 1 } };
+  }
+
+  const score = groundingScore(answer, contexts);
+  if (score < minCoverage) {
+    return {
+      pass: false,
+      reason: "UNGROUNDED",
+      message: "I drafted an answer but couldn't trace all of it back to my sources, so I'm not going to give it to you.",
+      detail: { groundingScore: +score.toFixed(3), threshold: minCoverage },
     };
   }
   return PASS;

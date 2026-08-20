@@ -21,6 +21,8 @@
  * duplicates of itself. Best rank per (passage, strategy) wins.
  */
 
+import { contentTokens } from "./tokens";
+
 export interface StrategyHits {
   strategy: string;
   /** Passage ordinals, best first. */
@@ -122,13 +124,18 @@ export function fusionMargin(fused: FusedHit[]): number {
   return (top - fused[1].fusedScore) / top;
 }
 
-/** Query-vs-passage token overlap. Cheap lexical sanity check for gate 2. */
+/**
+ * Query-vs-passage token overlap. Cheap lexical sanity check for gate 2.
+ *
+ * Measured over *content* words only. Counting function words made the score a
+ * measure of how tersely the question was phrased rather than of what it was
+ * about: "srinidhi" scored 1.0 against a passage that "what is the name" scored
+ * 0.25 against, and the threshold sits between them. See `tokens.ts`.
+ */
 export function lexicalOverlap(query: string, passage: string): number {
-  const norm = (s: string) =>
-    s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 1);
-  const q = new Set(norm(query));
+  const q = contentTokens(query);
   if (!q.size) return 0;
-  const p = new Set(norm(passage));
+  const p = contentTokens(passage);
   let hit = 0;
   for (const w of q) if (p.has(w)) hit++;
   return hit / q.size;

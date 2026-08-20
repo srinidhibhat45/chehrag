@@ -117,6 +117,87 @@ const trimmed = mixed.dropped.length === 1 && mixed.kept.includes("निगम 
 trimmed ? pass++ : fail++;
 console.log(`${trimmed ? "  ok  " : "  FAIL"} mixed answer: invented sentence dropped, grounded kept`);
 
+/*
+ * The generated path, which is what gate 3 is actually for.
+ *
+ * The extractive fallback is grounded by construction — it returns spans — so
+ * every case that matters here is a written sentence over a field-structured
+ * document, which is the shape that used to be rejected wholesale. The check
+ * that must never regress is the pair: the same sentence with the document's
+ * number passes, and with any other number fails.
+ */
+console.log("\n" + "-".repeat(70));
+console.log("  generated answers over a field-structured document");
+console.log("-".repeat(70));
+
+const bio = [
+  "name: srinidhi bhat, age: 45, sex: M, faults: crying",
+  "Srinidhi Bhat is a senior software engineer based in Bengaluru, India. He has eleven years of experience.",
+  "Contact: reachable by email only. Notice period is 60 days.",
+];
+
+const GEN_CASES: Array<[string, boolean]> = [
+  // Correct answers that add ordinary English. All of these failed the old
+  // all-tokens 0.62 check; "Your name is Srinidhi Bhat." missed it by 0.02.
+  ["Your name is Srinidhi Bhat.", true],
+  ["You are 45 years old.", true],
+  ["Srinidhi Bhat is based in Bengaluru, India.", true],
+  ["The notice period is 60 days.", true],
+  ["He has eleven years of experience.", true],
+  // A single wrong specific is a fabrication, not a near miss.
+  ["You are 46 years old.", false],
+  ["The notice period is 90 days.", false],
+  ["Srinidhi Bhat works at Google in Mountain View.", false],
+  // Answered from the model's own knowledge instead of the document.
+  ["The capital of France is Paris.", false],
+];
+
+for (const [answer, expected] of GEN_CASES) {
+  const got = gateGrounding(answer, bio).pass;
+  const ok = got === expected;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${expected ? "passes" : "REJECTED"}: ${answer}`);
+}
+
+/*
+ * Cross-lingual grounding — the case this corpus exists for.
+ *
+ * MS MARCO-XI is Hindi passages answering questions in fourteen languages, so
+ * an English answer written from a Hindi passage is the *normal* case, not an
+ * edge one. Word overlap between two scripts measures translation rather than
+ * grounding: the correct answer below scored 0.000 and was rejected, which
+ * silently disabled generated answers for every non-Hindi question.
+ *
+ * What still has to hold is the numeric check — a number is the one specific
+ * that survives translation, and it survives a change of numeral system too.
+ */
+console.log("\n" + "-".repeat(70));
+console.log("  cross-lingual answers (English over Hindi passages)");
+console.log("-".repeat(70));
+
+const hiCorp = ["निगमन एक नए निगम का गठन है (एक निगम एक कानूनी इकाई है जिसे प्रभावी रूप से कानून के तहत एक व्यक्ति के रूप में मान्यता प्राप्त है)।"];
+const hiAge  = ["नाम: श्रीनिधि भट, आयु: ४५ वर्ष।"];
+
+const XLING: Array<[string, string[], boolean, string]> = [
+  ["A corporation is a legal entity recognized as a person under law.", hiCorp, true,
+   "correct English answer from a Hindi passage"],
+  ["A corporation was founded in 1847 in Mumbai.", hiCorp, false,
+   "English answer carrying a number the passage never had"],
+  ["He is 45 years old.", hiAge, true,
+   "Devanagari numerals in the source match ASCII in the answer"],
+  ["He is 52 years old.", hiAge, false,
+   "wrong number, caught across scripts"],
+  ["निगम एक कानूनी इकाई है।", hiCorp, true,
+   "same script still takes the full coverage check"],
+];
+
+for (const [answer, ctx, expected, label] of XLING) {
+  const got = gateGrounding(answer, ctx).pass;
+  const ok = got === expected;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${expected ? "passes" : "REJECTED"}: ${label}`);
+}
+
 console.log("\n" + "=".repeat(70));
 console.log(`${pass} passed, ${fail} failed`);
 console.log("=".repeat(70));
