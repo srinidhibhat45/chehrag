@@ -68,6 +68,7 @@ async function main() {
   if (existsSync(thPath)) {
     const t = JSON.parse(readFileSync(thPath, "utf8"));
     cfg = { ...cfg, thresholds: {
+      ...cfg.thresholds,
       minTopScore: t.minTopScore, minAgreement: t.minAgreement,
       minLexicalOverlap: t.minLexicalOverlap ?? 0,
     } };
@@ -77,6 +78,10 @@ async function main() {
   }
 
   const engine = new RagEngine(index, encoder, cfg);
+  // The engine ships with the corpus off — the app starts empty so that an
+  // answer can only have come from what the user added. Every benchmark here
+  // exists to measure that corpus, so it opts in explicitly.
+  engine.setCorpusEnabled(true);
   await engine.warmup();
 
   console.log("=".repeat(74));

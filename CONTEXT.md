@@ -101,6 +101,12 @@ Everything in the fast path must be warmed at load and allocation-free per query
 - [x] STT client (Sarvam streaming + batch fallback) — written, needs live key to verify
 - [x] Running locally, verified in browser (dev and production build)
 - [x] User sources — paste / file / URL, chunked+embedded client-side, fused with the corpus
+- [x] **App starts empty** — the shipped corpus is opt-in, so an answer's origin is
+      unambiguous. Gate 1 refuses "nothing loaded" in 0.1ms as its own reason
+- [x] **English on user sources** — the MS MARCO-fitted absolute threshold refused
+      25% of answerable English questions; a measured mid-band lexical rescue
+      (user sources only) takes coverage 75% -> 96.4% with no new false answers,
+      and leaves the corpus's calibrated numbers identical to the query
 - [x] Deadline planner + `bench/deadline.ts` — cap holds to an **8ms** budget, 0 overruns
 - [x] Hosting config — `_headers`, cache busting, SSRF guards, deploy scripts
 - [x] Fireball — WebGL2 shader in a worker; 0 main-thread frames, measured

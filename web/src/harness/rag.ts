@@ -26,7 +26,7 @@ import { fuse, fusionMargin, lexicalOverlap, type FusedHit, type StrategyHits } 
 import type { SourceStore } from "../sources/store";
 import {
   gateInput, gateRetrieval, gateGrounding, DEFAULT_THRESHOLDS,
-  type ConfidenceThresholds, type GateResult, type Refusal,
+  type ConfidenceThresholds, type GateResult, type Refusal, type RetrievalSignals,
 } from "../guardrails/gates";
 
 export interface Encoder {
@@ -84,6 +84,16 @@ export interface RagAnswer {
    * multilingual stress test able to tell them apart.
    */
   retrieved?: number[];
+  /**
+   * The four signals gate 2 actually decided on.
+   *
+   * Carried on the answer, not just inside the gate, because "it refused" and
+   * "it refused because the score was 0.435 against a threshold of 0.4788
+   * while three strategies agreed" are different amounts of information, and
+   * only the second one can be argued with. Populated on refusals too — that
+   * is the case where it matters.
+   */
+  signals?: RetrievalSignals;
 }
 
 export interface RagConfig {
@@ -200,6 +210,21 @@ export class RagEngine {
   private cache = new Map<string, RagAnswer>();
   private store: SourceStore | null = null;
 
+  /**
+   * Whether the shipped MS MARCO corpus takes part in retrieval.
+   *
+   * Off by default, and that is a product decision rather than a technical one.
+   * A first-time visitor asking a question and getting an answer out of a Hindi
+   * passage collection they never chose has no way to tell whether the system
+   * read *their* document or just found something adjacent in its own. Starting
+   * empty makes the provenance of every answer unambiguous: it came from what
+   * you added, because that is all there is.
+   *
+   * The corpus is still here and still one toggle away — it is the thing that
+   * demonstrates cross-lingual retrieval at 99k passages — but it is opt-in.
+   */
+  private corpusEnabled = false;
+
   constructor(
     private readonly index: LoadedIndex,
     private readonly encoder: Encoder,
@@ -210,6 +235,27 @@ export class RagEngine {
 
   /** User sources are attached after boot, once the encoder is up. */
   attachSources(store: SourceStore): void { this.store = store; }
+
+  get corpusOn(): boolean { return this.corpusEnabled; }
+
+  /** Turning the corpus on or off changes what the right answer is. */
+  setCorpusEnabled(on: boolean): void {
+    if (this.corpusEnabled === on) return;
+    this.corpusEnabled = on;
+    this.invalidate();
+  }
+
+  /**
+   * Is there anything at all to search?
+   *
+   * With the corpus off and no sources added this is false, and the honest
+   * response to a question is to say so — not to run the pipeline and report
+   * LOW_CONFIDENCE, which claims we looked and found nothing good enough. We
+   * did not look. There was nowhere to look.
+   */
+  private searchable(): boolean {
+    return this.corpusEnabled || !!this.store?.hasEnabled;
+  }
 
   /** Passage text for either corpus. */
   textOf(passageId: number): string {
@@ -240,10 +286,22 @@ export class RagEngine {
    * in this system.
    */
   async warmup(samples: string[] = WARMUP_QUERIES): Promise<void> {
-    for (const s of samples) {
-      try { await this.ask(s, { skipCache: true }); } catch { /* warmup must never throw */ }
+    // Forced on for the duration regardless of the user's setting. Warm-up is
+    // about JIT and page faults, not about answers — and with the corpus off
+    // and no sources yet, every warm-up query would stop at gate 1 and leave
+    // retrieve, rescore and fuse stone cold. The first real question after the
+    // first source was added would then pay the whole interpreter-to-JIT cost
+    // and set P100 by itself.
+    const restore = this.corpusEnabled;
+    this.corpusEnabled = true;
+    try {
+      for (const s of samples) {
+        try { await this.ask(s, { skipCache: true }); } catch { /* warmup must never throw */ }
+      }
+    } finally {
+      this.corpusEnabled = restore;
+      this.cache.clear();
     }
-    this.cache.clear();
   }
 
   async ask(query: string, opts: { skipCache?: boolean } = {}): Promise<RagAnswer> {
@@ -265,6 +323,7 @@ export class RagEngine {
     let fused: FusedHit[] = [];
     let citations: Citation[] = [];
     let confidence = 0;
+    let signals: RetrievalSignals | undefined;
     // Whether gate 2 is about to read a calibrated cosine or a raw binary proxy.
     let rescored = false;
     let plan: RetrievalPlan = {
@@ -280,6 +339,16 @@ export class RagEngine {
         run: (q) => {
           const g = gateInput(q);
           if (!g.pass) refusal = g;
+          // Checked after gateInput so an unsafe or injected query still gets
+          // its own specific handling rather than being told to add a source.
+          else if (!this.searchable()) {
+            refusal = {
+              pass: false,
+              reason: "NO_SOURCES",
+              message: "There's nothing to search yet. Add a source — paste some " +
+                       "text, drop a file, or add a link — and I'll answer from it.",
+            };
+          }
           // Clamped here rather than in `gateInput`, which answers yes/no and
           // has no way to hand back a modified query. The clamped text is what
           // every later stage sees, so the answer, the citations and the
@@ -316,10 +385,12 @@ export class RagEngine {
           plan = budgetPlan(ctx.remaining(), cfg, store?.activeChunks ?? 0);
 
           const hits: StrategyHits[] = [];
-          for (const [name, ix] of idx.indices) {
-            const r = ix.search(qv, plan.nprobe, plan.perStrategyK);
-            if (r.n > 0) {
-              hits.push({ strategy: name, parentIds: r.parentIds, scores: r.scores, n: r.n });
+          if (this.corpusEnabled) {
+            for (const [name, ix] of idx.indices) {
+              const r = ix.search(qv, plan.nprobe, plan.perStrategyK);
+              if (r.n > 0) {
+                hits.push({ strategy: name, parentIds: r.parentIds, scores: r.scores, n: r.n });
+              }
             }
           }
           // User sources join the same fusion, offset into the shared id space.
@@ -355,7 +426,9 @@ export class RagEngine {
         fallback: (q) => q,
         run: (q) => {
           if (refusal || !fused.length) return q;
-          idx.rescorer.prepare(qv);
+          // Skipped with the corpus off: nothing in `fused` can be a corpus id,
+          // so preparing its rescorer would be work for a lookup never made.
+          if (this.corpusEnabled) idx.rescorer.prepare(qv);
           store?.prepareRescore(qv);
           const n = Math.min(plan.rescoreTopN, fused.length);
           for (let i = 0; i < n; i++) {
@@ -393,20 +466,32 @@ export class RagEngine {
           // lexical overlap) carry the decision alone. That is a weaker gate,
           // and it is reported as one rather than passed off as the calibrated
           // path.
+          // The mid-band lexical rescue is a correction for a corpus mismatch,
+          // so it is applied only where the mismatch is. `minTopScore` was
+          // fitted on THIS corpus's own 3,012 labelled unanswerable queries;
+          // where the winning passage came from it, the calibration holds and
+          // there is nothing to correct. Measured: enabling the rescue on the
+          // corpus too raised coverage 88.5% -> 93.1% but cut abstention recall
+          // 0.245 -> 0.172 — buying 16 more correct answers with 11 more wrong
+          // ones, on the one split where we have labels saying so.
+          const fromUserSource = top.passageId >= USER_BASE;
           const thresholds = rescored
-            ? cfg.thresholds
-            : { ...cfg.thresholds, minTopScore: -Infinity };
+            ? (fromUserSource
+                ? cfg.thresholds
+                : { ...cfg.thresholds, rescueMinScore: Infinity })
+            : { ...cfg.thresholds, minTopScore: -Infinity, rescueMinScore: Infinity };
           if (!rescored) {
             plan = { ...plan, degraded: true,
                      reason: "rescore skipped — confidence is uncalibrated" };
           }
 
-          const g = gateRetrieval({
+          signals = {
             topScore: top.bestRawScore,
             margin: fusionMargin(fused),
             strategyAgreement: top.agreement,
             lexicalOverlap: lexicalOverlap(q, this.textOf(top.passageId)),
-          }, thresholds);
+          };
+          const g = gateRetrieval(signals, thresholds);
           if (!g.pass) refusal = g;
           return q;
         },
@@ -458,6 +543,7 @@ export class RagEngine {
         totalMs: run.totalMs,
         plan,
         retrieved,
+        signals,
       };
     } else if (!run.ok || !citations.length) {
       out = {
@@ -470,6 +556,7 @@ export class RagEngine {
         totalMs: run.totalMs,
         plan,
         retrieved,
+        signals,
       };
     } else {
       out = {
@@ -481,6 +568,7 @@ export class RagEngine {
         totalMs: run.totalMs,
         plan,
         retrieved,
+        signals,
       };
     }
 

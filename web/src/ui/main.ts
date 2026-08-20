@@ -75,6 +75,44 @@ $("theme-btn").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
+// what is searchable
+// ---------------------------------------------------------------------------
+
+const CORPUS_KEY = "chehrag-corpus";
+
+/** Opt-in, and remembered. Absent means off — a first visit starts empty. */
+function corpusPref(): boolean { return localStorage.getItem(CORPUS_KEY) === "1"; }
+
+function setCorpus(on: boolean): void {
+  localStorage.setItem(CORPUS_KEY, on ? "1" : "0");
+  engine?.setCorpusEnabled(on);
+  syncSources();
+}
+
+/**
+ * Reflect what is actually searchable, in the rail and in the welcome.
+ *
+ * Tolerates a missing welcome: `Chat` removes that block as soon as the first
+ * question is asked, and this runs again every time a source changes.
+ */
+function syncSources(): void {
+  const on = engine?.corpusOn ?? corpusPref();
+
+  $("corpus-card").dataset.enabled = on ? "1" : "0";
+  const toggle = $<HTMLButtonElement>("corpus-toggle");
+  toggle.setAttribute("aria-pressed", String(on));
+  toggle.setAttribute("aria-label",
+    on ? "Stop searching the Hindi sample set" : "Search the Hindi sample set");
+
+  // The sample questions are questions about the Hindi corpus. Offering them
+  // while it is switched off would be offering a button that cannot work.
+  const suggest = document.getElementById("suggest");
+  if (suggest) suggest.hidden = !on;
+  const hint = document.getElementById("welcome-hint");
+  if (hint) hint.hidden = on || !!store?.hasEnabled;
+}
+
+// ---------------------------------------------------------------------------
 // languages
 // ---------------------------------------------------------------------------
 
@@ -237,7 +275,11 @@ async function boot(): Promise<void> {
   let cfg: RagConfig = { ...DEFAULT_CONFIG };
   try {
     const t = await (await fetch("/thresholds.json")).json();
+    // Spread over the defaults rather than replacing them: calibrate.ts fits
+    // three of these fields and does not know about the rest, so a literal
+    // object here would silently reset every threshold it omits to undefined.
     cfg = { ...cfg, thresholds: {
+      ...cfg.thresholds,
       minTopScore: t.minTopScore, minAgreement: t.minAgreement,
       minLexicalOverlap: t.minLexicalOverlap ?? 0,
     } };
@@ -255,7 +297,12 @@ async function boot(): Promise<void> {
     workerBase: WORKER_BASE,
   });
   engine.attachSources(store);
-  new SourcesPanel(store, { onChange: () => engine.invalidate() });
+  // Applied before warmup so the console handle and the rail agree from the
+  // first frame. Warmup forces the corpus on internally regardless — it is
+  // warming code paths, not answering questions.
+  engine.setCorpusEnabled(corpusPref());
+  new SourcesPanel(store, { onChange: () => { engine.invalidate(); syncSources(); } });
+  store.subscribe(() => syncSources());
   // Sources added in a previous session replay from IndexedDB. Not awaited on
   // the critical path — the corpus is already searchable without them.
   void store.restore().catch(() => { /* corrupt store: start empty */ });
@@ -269,6 +316,7 @@ async function boot(): Promise<void> {
   $("corpus-meta").textContent =
     `${index.manifest.numPassages.toLocaleString()} passages · ${chunks.toLocaleString()} chunks · ` +
     `${Object.keys(index.manifest.strategies).length} strategies`;
+  syncSources();
   $("src-stat").textContent = `ready in ${((performance.now() - t0) / 1000).toFixed(1)}s`;
 
   app.dataset.stage = "idle";
@@ -342,11 +390,20 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
       userChunks: store?.activeChunks ?? 0,
       truncated: store?.truncated ?? false,
     });
-    sessionTimes.push(res.totalMs);
-    renderSessionStats();
+    // Only questions that were actually searched belong in the session figures.
+    // A refusal for want of a source never reached the encoder, and folding its
+    // 0.1 ms into the readout would flatter every number in it.
+    if (res.refusal !== "NO_SOURCES") {
+      sessionTimes.push(res.totalMs);
+      renderSessionStats();
+    }
 
     const answered = res.status === "answered";
     orb.set(answered ? "answered" : "refused", answered ? "Answered" : "Declined", "");
+
+    // Refusing for want of a source and leaving the user to find the Add
+    // button themselves is a dead end. Put the panel in front of them.
+    if (res.refusal === "NO_SOURCES") openAddPanel();
 
     if (answered && $<HTMLSelectElement>("voice-sel").value !== "off" && opts.voice) {
       // Spoken questions get spoken answers without being asked twice; typed
@@ -553,12 +610,21 @@ $("mic-btn").addEventListener("click", () => void toggleMic());
 for (const chip of document.querySelectorAll<HTMLButtonElement>(".chip")) {
   chip.addEventListener("click", () => void ask(chip.dataset.q ?? ""));
 }
+$("corpus-toggle").addEventListener("click", () => setCorpus(!(engine?.corpusOn ?? false)));
+$("try-corpus").addEventListener("click", () => setCorpus(true));
 $("voice-sel").addEventListener("change", () => {
   if ($<HTMLSelectElement>("voice-sel").value === "off") speaker.stop();
   updateVoiceNote();
 });
 
 // -- add-a-source panel ------------------------------------------------------
+function openAddPanel(): void {
+  $("add-panel").hidden = false;
+  $("add-btn").setAttribute("aria-expanded", "true");
+  $("rail").dataset.hilite = "1";
+  setTimeout(() => { delete $("rail").dataset.hilite; }, 1600);
+}
+
 const addBtn = $<HTMLButtonElement>("add-btn");
 addBtn.addEventListener("click", () => {
   const open = $("add-panel").hidden;

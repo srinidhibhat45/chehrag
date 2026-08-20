@@ -105,25 +105,25 @@
     </div>
 
     <div class="rail-scroll">
-      <!-- the shipped corpus is a source like any other, and says so -->
-      <div class="src src-corpus" id="corpus-card">
+      <!-- The shipped corpus is a source like any other — including being
+           switchable, and starting off. Answers should come from what you
+           added, unless you decide otherwise. -->
+      <div class="src src-corpus" id="corpus-card" data-enabled="0">
         <span class="src-kind">Set</span>
         <div class="src-body">
           <div class="src-title">MS MARCO · Hindi</div>
           <div class="src-meta" id="corpus-meta">loading…</div>
         </div>
-        <span class="src-locked" title="Always searched">
-          <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
-            <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
-                  d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v10H5z"/>
-          </svg>
-        </span>
+        <div class="src-actions">
+          <button class="src-toggle" id="corpus-toggle" type="button"
+                  aria-pressed="false" aria-label="Search the Hindi sample set"></button>
+        </div>
       </div>
 
       <div class="src-list" id="src-list"></div>
       <p class="src-empty" id="src-empty">
         Add your own text, files or links. They're read and indexed in this
-        browser, then searched alongside the set above.
+        browser, and nothing is uploaded anywhere.
       </p>
     </div>
 
@@ -134,13 +134,18 @@
   <main class="chat" id="chat">
     <div class="thread" id="thread">
       <div class="welcome" id="welcome">
-        <h1 class="welcome-h">Ask in any of<br />fourteen languages.</h1>
+        <h1 class="welcome-h">Ask your documents,<br />in fourteen languages.</h1>
         <p class="welcome-p">
-          Every answer is found, ranked and grounded <em>in this browser</em> —
-          nothing is sent anywhere, which is how it stays under 200&nbsp;milliseconds.
-          Each reply carries its own stopwatch.
+          Add something first — paste text, drop a file, or give a link. It's read
+          and indexed <em>in this browser</em>, nothing is uploaded anywhere, and
+          every answer comes back from it in under 200&nbsp;milliseconds with a
+          stopwatch attached.
         </p>
-        <div class="suggest" id="suggest">
+        <p class="welcome-hint" id="welcome-hint">
+          Nothing handy? <button class="link-btn" id="try-corpus" type="button">Switch on the Hindi sample set</button>
+          — 98,867 passages, and a way to see the cross-lingual retrieval work.
+        </p>
+        <div class="suggest" id="suggest" hidden>
           <button class="chip" data-q="कॉर्पोरेशन क्या है?">
             <span class="chip-lang">हिन्दी</span>कॉर्पोरेशन क्या है?
           </button>

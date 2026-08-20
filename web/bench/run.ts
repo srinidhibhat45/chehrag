@@ -95,11 +95,16 @@ async function main() {
   let cfg: RagConfig = { ...DEFAULT_CONFIG };
   try {
     const th = JSON.parse(readFileSync("public/thresholds.json", "utf8"));
-    cfg = { ...cfg, thresholds: { minTopScore: th.minTopScore, minAgreement: th.minAgreement,
+    cfg = { ...cfg, thresholds: { ...cfg.thresholds,
+                                  minTopScore: th.minTopScore, minAgreement: th.minAgreement,
                                   minLexicalOverlap: th.minLexicalOverlap ?? 0 } };
     console.log(`thresholds : fitted — minTopScore ${th.minTopScore} minAgreement ${th.minAgreement}`);
   } catch { console.log("thresholds : defaults (calibration not run)"); }
   const engine = new RagEngine(index, enc, cfg);
+  // The engine ships with the corpus off — the app starts empty so that an
+  // answer can only have come from what the user added. Every benchmark here
+  // exists to measure that corpus, so it opts in explicitly.
+  engine.setCorpusEnabled(true);
 
   // ---- warmup (discarded) -------------------------------------------------
   const warm = all.slice(0, WARMUP);

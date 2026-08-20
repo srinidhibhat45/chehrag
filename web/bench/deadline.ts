@@ -78,6 +78,7 @@ function fittedConfig() {
     return {
       ...DEFAULT_CONFIG,
       thresholds: {
+        ...DEFAULT_CONFIG.thresholds,
         minTopScore: th.minTopScore,
         minAgreement: th.minAgreement,
         minLexicalOverlap: th.minLexicalOverlap ?? 0,
@@ -109,6 +110,7 @@ async function main(): Promise<void> {
   const reference = new Map<string, number[]>();
   {
     const engine = new RagEngine(index, enc, { ...base, globalBudgetMs: 200 });
+    engine.setCorpusEnabled(true);   // the corpus is what this measures
     await engine.warmup();
     for (const q of queries) {
       const r = await engine.ask(q, { skipCache: true });
@@ -127,6 +129,7 @@ async function main(): Promise<void> {
 
   for (const budget of BUDGETS) {
     const engine = new RagEngine(index, enc, { ...base, globalBudgetMs: budget });
+    engine.setCorpusEnabled(true);   // the corpus is what this measures
     await engine.warmup();
     // Extra warming per engine. Each budget gets a fresh RagEngine, and a fresh
     // engine's first few queries run interpreted — without this the P100 column

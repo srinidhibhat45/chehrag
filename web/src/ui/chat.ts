@@ -36,6 +36,7 @@ const REFUSAL_HINT: Record<string, string> = {
   LOW_CONFIDENCE:"nothing in the sources matched well enough",
   NO_AGREEMENT:  "the chunking strategies disagreed",
   UNGROUNDED:    "couldn't ground an answer in the retrieved text",
+  NO_SOURCES:    "nothing added yet",
 };
 
 export interface BotHandle {
@@ -167,6 +168,10 @@ export class Chat {
       why.textContent = REFUSAL_HINT[r.refusal] ?? r.refusal.toLowerCase().replace(/_/g, " ");
       body.append(why);
     }
+
+    // Nothing was searched, so there is nothing to time, cite or speak. A
+    // stopwatch here would be advertising speed for doing no work.
+    if (r.refusal === "NO_SOURCES") return;
 
     const meta = div("msg-meta");
     body.append(meta);

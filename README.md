@@ -47,17 +47,27 @@ Consequences, all of which we wanted anyway:
 | 1 | STT via Sarvam or ElevenLabs | **Both, and speech in both directions.** In: **Sarvam** `saaras:v3-realtime` streaming, proxied by a Cloudflare Worker (`web/src/stt/sarvam.ts`). Out: **ElevenLabs** `eleven_flash_v2_5` where it has the language, **Sarvam** `bulbul:v2` for the eight Indic languages it does not (`web/src/tts/speak.ts`) |
 | 2 | Chunking must be "vast", not naive fixed-size | **6 strategies**, separately indexed, fused with RRF — applied to the corpus *and* to anything the user adds. `pipeline/src/chunking/strategies.py`, `web/src/sources/chunk.ts` |
 | 3 | Full pipeline under 200ms | Runs in-browser. Measured below, and **enforced** by a deadline-aware planner rather than hoped for |
-| 4 | P50 / P70 / P100 over many queries | `web/bench/run.ts`, `web/bench/deadline.ts`, `web/bench/multilingual.ts` (3,000 queries across 15 languages), and an in-page benchmark |
+| 4 | P50 / P70 / P100 over many queries | `web/bench/run.ts`, `web/bench/deadline.ts`, `web/bench/multilingual.ts` (3,000 queries across 15 languages). The app itself reports a stopwatch per answer and a session summary; the sweeps live in the bench scripts rather than in the interface |
 | 5 | A real harness | Typed stage pipeline: budgets, retries, degradation, circuit breaker. `web/src/harness/pipeline.ts` |
-| 6 | Guardrails | Three gates, threshold **fitted on real labels**. `web/src/guardrails/gates.ts` |
+| 6 | Guardrails | Three gates, threshold **fitted on real labels**, plus a measured correction for user-added sources the fitted threshold does not cover. `web/src/guardrails/gates.ts` |
 
 ---
 
 ## Bring your own sources
 
-Chehrag ships with a corpus, but the point of a lamp is that you get to ask it
-about *your* things. Three ways in — **paste**, **file**, **link** — and all of
-them land in the same place.
+**The app starts empty.** Chehrag ships with a 98,867-passage Hindi corpus, but
+it is switched off on a first visit and you have to turn it on deliberately.
+That is a decision about provenance, not about capability: someone who asks a
+question and gets an answer out of a passage collection they never chose has no
+way to know whether the system read *their* document or just found something
+adjacent in its own. Starting empty makes every answer's origin unambiguous —
+it came from what you added, because that is all there was.
+
+The corpus is one toggle away in the sources rail, and it is what demonstrates
+cross-lingual retrieval at scale. It is just not the default.
+
+Three ways in — **paste**, **file**, **link** — and all of them land in the
+same place.
 
 | Input | Handled by | Notes |
 |---|---|---|
@@ -78,10 +88,9 @@ extract text → cut into passage-sized units → 6 chunking strategies
 Three properties this design buys:
 
 **Your sources rank against the corpus, not beside it.** Both sides are
-projected into the same PCA space and quantised identically, so the 98,867
-shipped passages and your PDF compete in a single RRF fusion under a single
-calibrated confidence threshold. There is no "search my documents" toggle
-because there does not need to be one.
+projected into the same PCA space and quantised identically, so — when the
+corpus is switched on — the 98,867 shipped passages and your PDF compete in a
+single RRF fusion rather than in two result lists that have to be reconciled.
 
 **Nothing is uploaded.** Embedding happens in a Web Worker on your machine.
 The Worker in the cloud only ever sees a URL you explicitly ask it to fetch.
@@ -138,9 +147,14 @@ about function names rather than about behaviour.
 
 | Gate | Question | Method |
 |---|---|---|
-| 1 — input | Should we process this at all? | unsafe content, prompt injection (EN + HI), gibberish via character entropy, non-questions |
+| 1 — input | Should we process this at all? | unsafe content, prompt injection (EN + HI), gibberish via character entropy, non-questions — and whether there is anything loaded to search at all |
 | 2 — retrieval | Did we actually find anything? | confidence threshold + cross-strategy agreement |
 | 3 — grounding | Is every claim traceable to a source? | token-level support check against retrieved context |
+
+Gate 1 refuses a question asked with nothing loaded in 0.1 ms, before any vector
+is computed, and says *that* rather than "I couldn't find anything good enough".
+The two are different facts, and reporting the second tells a new user their
+question was bad when the app is simply empty.
 
 Gate 2 is the important one, and it is **calibrated rather than guessed**. The
 corpus ships **3,012 queries with no relevant passage** — genuine cases where
@@ -150,6 +164,36 @@ on a holdout that never influenced selection (`web/bench/calibrate.ts`).
 The objective is deliberately *not* accuracy. Answering confidently when you
 shouldn't is worse than declining too often, so we target abstention precision
 and report the recall it costs.
+
+### The threshold does not transfer, and pretending it does breaks English
+
+`minTopScore` is an **absolute** cosine, fitted on MS MARCO. MS MARCO passages
+are search results: dense, on topic, and selected *because* they answered a
+query. A user's HR policy or a page of prose is not written that way, and its
+genuinely correct passage scores where MS MARCO's mediocre ones do.
+
+Measured on 43 labelled questions over two English documents, the single fitted
+threshold refused **25% of answerable questions** — including "what equipment
+does the company provide", which the document answers word for word.
+
+The mid-band turns out to be separable, just not by score. Every false positive
+in it had weak word overlap with the passage that won (0.0–0.4): the embedder
+had found the right *subject* and the wrong *question* — "how much does a kettle
+cost" against a history of kettles. Every true positive had strong overlap
+(0.5–1.0). So a hit scoring in `[0.40, minTopScore)` whose winning passage
+shares at least half the query's content words is answered rather than refused.
+
+| Questions over two English documents | single threshold | + lexical rescue |
+|---|---|---|
+| Answerable, answered | 21/28 (75.0%) | **27/28 (96.4%)** |
+| Unanswerable, correctly refused | 13/15 | 13/15 (unchanged) |
+
+**It applies to user sources only.** Enabling it on the corpus too was measured
+and rejected: coverage rose 88.5% → 93.1% but abstention recall fell
+0.245 → 0.172, buying 16 more correct answers with 11 more wrong ones — on the
+one split where 3,012 labels say which is which. The corpus is the distribution
+`minTopScore` was fitted on, so there is no mismatch there to correct, and its
+reported guardrail numbers are unchanged to the query.
 
 The extractive fast path is **grounded by construction** — every character is
 copied from a retrieved passage. Gate 3 exists for the optional LLM-polished

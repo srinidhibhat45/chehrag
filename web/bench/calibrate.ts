@@ -76,8 +76,13 @@ async function main() {
   // Thresholds are disabled during collection so every query yields a score.
   const engine = new RagEngine(index, enc, {
     ...DEFAULT_CONFIG,
-    thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0 },
+    thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0,
+                  rescueMinScore: Infinity, rescueMinOverlap: 1 },
   });
+  // The engine ships with the corpus off — the app starts empty so that an
+  // answer can only have come from what the user added. Every benchmark here
+  // exists to measure that corpus, so it opts in explicitly.
+  engine.setCorpusEnabled(true);
   await engine.warmup();
 
   const all: QRec[] = readFileSync(QUERIES, "utf8").trim().split("\n").map((l) => JSON.parse(l));

@@ -27,7 +27,12 @@ export type Refusal =
   | "NOT_A_QUESTION"
   | "LOW_CONFIDENCE"
   | "NO_AGREEMENT"
-  | "UNGROUNDED";
+  | "UNGROUNDED"
+  // Not a guardrail decision about the query — a precondition. Distinct from
+  // LOW_CONFIDENCE on purpose: "I searched and found nothing good enough" and
+  // "there was nothing to search" are different facts, and collapsing them
+  // tells a new user their question was bad when the app is simply empty.
+  | "NO_SOURCES";
 
 export interface GateResult {
   pass: boolean;
@@ -266,6 +271,37 @@ export interface ConfidenceThresholds {
   minTopScore: number;
   minAgreement: number;
   minLexicalOverlap: number;
+  /**
+   * Mid-band rescue. A hit scoring below `minTopScore` but at or above
+   * `rescueMinScore`, whose winning passage shares at least `rescueMinOverlap`
+   * of the query's content words, is answered rather than refused.
+   *
+   * This exists because `minTopScore` is an *absolute* cosine, and absolute
+   * cosine does not transfer between corpora. It was fitted on MS MARCO, whose
+   * passages are search results — written densely, on topic, and selected
+   * because they answered a query. A user's policy document or a page of prose
+   * is not built that way, and its genuinely correct passage lands where MS
+   * MARCO's mediocre ones do. Measured on 28 answerable and 15 unanswerable
+   * questions over two English documents, the single threshold refused 25% of
+   * answerable questions — including one the document answered word for word.
+   *
+   * The mid-band is separable, just not by score. Every false positive in it
+   * had weak word overlap with the passage that won (0.0–0.4): the embedder
+   * found the right *subject* and the wrong *question* — "how much does a
+   * kettle cost" against a history of kettles. Every true positive had strong
+   * overlap (0.5–1.0). So overlap is what carries the decision there, and the
+   * floor is what stops it reaching down into the genuinely-unrelated band,
+   * where an unanswerable question can still share half its words with a
+   * passage on the same topic.
+   *
+   * Applied to user-added sources only. `rag.ts` switches it off when the
+   * winning passage came from the shipped corpus, because that is the corpus
+   * `minTopScore` was fitted on and there is no mismatch there to correct.
+   *
+   * Set `rescueMinScore` to `Infinity` to switch the rescue off entirely.
+   */
+  rescueMinScore: number;
+  rescueMinOverlap: number;
 }
 
 /**
@@ -277,13 +313,24 @@ export const DEFAULT_THRESHOLDS: ConfidenceThresholds = {
   minTopScore: 0.80,
   minAgreement: 2,
   minLexicalOverlap: 0.0,
+  // Fitted on 43 labelled questions over two English documents — a far smaller
+  // sample than the 3,012 that fitted `minTopScore`, and stated as such. The
+  // check that matters is the other direction: `bench/run.ts` measures what
+  // this costs on the corpus's own labelled unanswerable split.
+  rescueMinScore: 0.40,
+  rescueMinOverlap: 0.5,
 };
 
 export function gateRetrieval(
   s: RetrievalSignals,
   t: ConfidenceThresholds = DEFAULT_THRESHOLDS,
 ): GateResult {
-  if (s.topScore < t.minTopScore) {
+  // Two independent signals agreeing is worth more than one clearing a bar
+  // that was calibrated on a different corpus. See `rescueMinScore`.
+  const rescued =
+    s.topScore >= t.rescueMinScore && s.lexicalOverlap >= t.rescueMinOverlap;
+
+  if (s.topScore < t.minTopScore && !rescued) {
     return {
       pass: false,
       reason: "LOW_CONFIDENCE",

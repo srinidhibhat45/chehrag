@@ -26,7 +26,12 @@ for (const sh of manifest.passageShards) {
 }
 const engine = new RagEngine(assembleIndex(manifest, buf, passages), await (async () => {
   const e = new E5Encoder(); await e.init(); return e;
-})(), { ...DEFAULT_CONFIG, thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0 } });
+})(), { ...DEFAULT_CONFIG, thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0,
+                rescueMinScore: Infinity, rescueMinOverlap: 1 } });
+// The engine ships with the corpus off — the app starts empty so that an
+// answer can only have come from what the user added. Every benchmark here
+// exists to measure that corpus, so it opts in explicitly.
+engine.setCorpusEnabled(true);
 await engine.warmup();
 
 const OUT_OF_CORPUS = [
