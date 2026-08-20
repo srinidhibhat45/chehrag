@@ -1037,6 +1037,163 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: rgb(0 0 0 / .5);
 }
 
+/* ── the first-run curtain ──────────────────────────────────────────────
+   Sits outside `.app`, which carries `inert` while this is up, so the dead
+   controls behind it cannot be clicked or tabbed into. It is opaque rather
+   than a scrim on purpose: a half-visible disabled interface underneath
+   invites the clicking that the block exists to prevent.
+
+   Obeys rule 1 — the only chroma here is the lamp and the bar it is filling,
+   which are the same object. The ticks, the rules and every word are ink. */
+.curtain {
+  position: fixed; inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 32px 26px;
+  background: var(--ground);
+  transition: opacity .34s ease;
+}
+.curtain[hidden] { display: none; }
+.curtain[data-state="lifted"] { opacity: 0; pointer-events: none; }
+
+.curtain-panel { width: min(400px, 100%); text-align: center; }
+
+/* Not a second metaphor — this is the lamp before it is lit, and the bar
+   below is its charge. Only opacity and transform move (rule 4). */
+.curtain-lamp {
+  position: relative;
+  display: block;
+  width: 10px; height: 10px;
+  margin: 0 auto 24px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, var(--flame-hot), var(--flame) 55%, var(--flame-deep));
+}
+.curtain-lamp::after {
+  content: "";
+  position: absolute; inset: -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(var(--flame-rgb) / .55), transparent 70%);
+  animation: curtain-breathe 2.8s ease-in-out infinite;
+}
+@keyframes curtain-breathe {
+  0%, 100% { opacity: .4; transform: scale(.88); }
+  50%      { opacity: 1;  transform: scale(1.18); }
+}
+
+.curtain-h {
+  margin: 0 0 9px;
+  font: 400 26px/1.2 var(--display);
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.curtain-why {
+  margin: 0 0 26px;
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.curtain-error {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--warn);
+}
+
+.curtain-bar {
+  height: 2px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.curtain-fill {
+  display: block;
+  width: 0; height: 100%;
+  background: var(--flame);
+  box-shadow: 0 0 10px rgb(var(--flame-rgb) / .55);
+  transition: width .3s ease;
+}
+
+.curtain-steps {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.curtain-step {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 1px;
+  font-size: 13px;
+  border-top: 1px solid var(--line);
+}
+.curtain-step:first-child { border-top: 0; }
+.curtain-step-k { color: var(--ink-3); }
+.curtain-step[data-state="run"]  .curtain-step-k { color: var(--ink); }
+.curtain-step[data-state="done"] .curtain-step-k { color: var(--ink-2); }
+.curtain-step-v {
+  font: 400 11px/1 var(--mono);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.curtain-tick {
+  position: relative;
+  width: 13px; height: 13px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+}
+.curtain-step[data-state="wait"] .curtain-tick { opacity: .45; }
+.curtain-step[data-state="run"]  .curtain-tick { border-color: var(--ink-3); }
+.curtain-step[data-state="run"]  .curtain-tick::after {
+  content: "";
+  position: absolute; inset: 3px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  animation: curtain-pulse 1.5s ease-in-out infinite;
+}
+@keyframes curtain-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.curtain-step[data-state="done"] .curtain-tick {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+.curtain-step[data-state="done"] .curtain-tick::after {
+  content: "";
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 3px; height: 6px;
+  border: solid var(--ground);
+  border-width: 0 1.4px 1.4px 0;
+  transform: rotate(42deg);
+}
+
+.curtain-foot {
+  margin: 20px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.curtain-retry { margin-top: 18px; }
+
+/* A failure has no progress to report, and `--warn` is a text colour here and
+   nowhere else (rule 1) — so the instrument goes away rather than turning red. */
+.curtain[data-state="failed"] .curtain-bar,
+.curtain[data-state="failed"] .curtain-steps,
+.curtain[data-state="failed"] .curtain-why { display: none; }
+.curtain[data-state="failed"] .curtain-lamp::after { animation: none; opacity: .2; }
+
+.curtain-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 1180px) {
   :root { --rail-w: 250px; --studio-w: 300px; }
   .welcome-h { font-size: 40px; }

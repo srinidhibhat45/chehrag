@@ -1,25 +1,23 @@
 /**
  * Search structure for user-added sources.
  *
- * Flat, not IVF, on purpose. IVF exists in `retrieval/ivf.ts` because 810k
- * corpus chunks cannot be scanned inside the budget; user sources are three or
- * four orders of magnitude smaller, and clustering them would mean running
- * k-means in the browser every time a document is added — seconds of work to
- * save microseconds of query, plus a recall loss on the very corpus the user
- * cares most about.
+ * Flat rather than IVF. `retrieval/ivf.ts` exists because 810k corpus chunks
+ * cannot be scanned inside the budget; user sources are three or four orders of
+ * magnitude smaller, and clustering them would mean running k-means in the
+ * browser on every document added — seconds of work to save microseconds of
+ * query, plus a recall loss on the corpus the user cares most about.
  *
- * The bit that *is* load-bearing for P100: a flat scan is O(n) in a number the
- * user controls. So the scan is hard-capped. Beyond `maxScan` chunks the index
- * stops looking rather than blowing the budget, and says that it did.
+ * What is load-bearing for P100: a flat scan is O(n) in a number the user
+ * controls, so it is hard-capped. Beyond `maxScan` chunks the index stops
+ * looking and reports that it did.
  *
- * Results come back bucketed by chunking strategy, matching the shape the
- * corpus indices return, because fusion weights are per-strategy: a `document`
- * hit and a `whole` hit are not worth the same and must not arrive in the same
- * undifferentiated list.
+ * Results come back bucketed by chunking strategy, matching the shape the corpus
+ * indices return, because fusion weights are per-strategy — a `document` hit and
+ * a `whole` hit are not worth the same.
  *
- * Layout and scoring are identical to the corpus index — same PCA space, same
+ * Layout and scoring match the corpus index exactly — same PCA space, same
  * sign-bit binarisation, same int8 rescoring — so hits from both fuse without
- * any per-source normalisation.
+ * per-source normalisation.
  */
 
 import type { Strategy } from "./chunk";
@@ -40,9 +38,9 @@ export interface StrategyBucket {
   n: number;
 }
 
-/** Same routine as ivf.ts. `Math.imul` and `>>>` are correctness, not style:
- *  plain `*` overflows into a double and the following shift silently returns a
- *  wrong count, which ranks results by garbage without erroring. */
+/** Same routine as `ivf.ts`. `Math.imul` and `>>>` are correctness, not style:
+ *  plain `*` overflows into a double and the following shift returns a wrong
+ *  count, ranking results by garbage without erroring. */
 function popcnt(x: number): number {
   x = x - ((x >>> 1) & 0x55555555);
   x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
@@ -78,7 +76,7 @@ export class UserIndex {
   private seen = new Map<Strategy, Set<number>>();
   private out: StrategyBucket[] = [];
 
-  /** True when the last search hit the scan ceiling. Surfaced in telemetry so a
+  /** True when the last search hit the scan ceiling. Surfaced in telemetry, so a
    *  truncated search is visible rather than silently partial. */
   truncated = false;
 
@@ -113,9 +111,9 @@ export class UserIndex {
    * Register a block of already-quantised passage vectors, returning the
    * user-passage ordinal of the first.
    *
-   * Quantisation happens in `quantise.ts` rather than here so the store holds
-   * the exact bytes it needs to persist — otherwise adding a source would
-   * quantise once for search and again for IndexedDB.
+   * Quantisation happens in `quantise.ts` so the store holds the exact bytes it
+   * persists; doing it here would quantise once for search and again for
+   * IndexedDB.
    */
   addPassages(int8: Int8Array, scale: Float32Array): number {
     const n = scale.length;
@@ -154,9 +152,9 @@ export class UserIndex {
 
   // -- readback, for persistence -------------------------------------------
   //
-  // The store owns what gets written to IndexedDB, but the bytes live here.
-  // These let it copy out one source's slice without keeping a duplicate of
-  // every array in memory for the whole session.
+  // The store decides what is written to IndexedDB, but the bytes live here.
+  // These copy out one source's slice without keeping a duplicate of every
+  // array in memory for the whole session.
 
   refsOf(source: number): Array<ChunkRef & { slot: number }> {
     const out: Array<ChunkRef & { slot: number }> = [];
@@ -183,9 +181,9 @@ export class UserIndex {
   /** Drop every chunk belonging to a source. */
   removeSource(source: number): void {
     if (!this.refs.some((r) => r.source === source)) return;
-    // Compact codes in place. Passage vectors are left where they are: their
-    // ordinals are permanent keys for every surviving chunk, so renumbering
-    // would mean rewriting every ref. The orphans are unreachable, not wrong.
+    // Compact codes in place. Passage vectors stay put: their ordinals are
+    // permanent keys for every surviving chunk, so renumbering would mean
+    // rewriting every ref. The orphans are unreachable, not wrong.
     let w = 0;
     const cw = this.codeWords;
     const kept: ChunkRef[] = [];
@@ -231,9 +229,9 @@ export class UserIndex {
       qc[w] = acc >>> 0;
     }
 
-    // Bounded top-POOL selection during the scan itself. Keeping the candidate
-    // pool inline avoids a second pass over the full array and keeps the memory
-    // touched per query constant regardless of how much the user has added.
+    // Bounded top-POOL selection during the scan itself. An inline pool avoids a
+    // second pass over the full array and keeps the memory touched per query
+    // constant however much the user has added.
     const codes = this.codes;
     const skipAny = this.disabled.size > 0;
     const limit = Math.min(this.count, this.maxScan);
@@ -263,9 +261,9 @@ export class UserIndex {
     for (const set of this.seen.values()) set.clear();
     for (const b of this.buckets.values()) b.n = 0;
 
-    // Selection sort over the pool, stopping once every bucket is either full or
-    // starved. Sorting all POOL candidates would be wasted work — the tail of
-    // the pool never reaches a bucket.
+    // Selection sort over the pool, stopping once every bucket is full or
+    // starved. Sorting all POOL candidates is wasted work: the tail never
+    // reaches a bucket.
     const want = K * 6;
     const take = Math.min(m, want);
     let filled = 0;
@@ -291,7 +289,7 @@ export class UserIndex {
     return this.out;
   }
 
-  /** Exact-ish int8 rescore of one user passage — the corpus rescorer's twin. */
+  /** int8 rescore of one user passage — the corpus rescorer's twin. */
   prepare(q: Float32Array): void {
     for (let i = 0; i < this.dim; i++) {
       const v = Math.round(q[i] * 127);

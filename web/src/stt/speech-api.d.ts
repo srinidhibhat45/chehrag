@@ -1,14 +1,12 @@
 /**
  * Minimal `SpeechRecognition` typings.
  *
- * The Web Speech *synthesis* half is in `lib.dom.d.ts`; the *recognition* half
- * is not, because it never left the WICG stage and remains a Chromium-only
- * prefixed API in practice. TypeScript ships `SpeechRecognitionResult` but not
- * the interface that produces one.
+ * The Web Speech synthesis half is in `lib.dom.d.ts`; the recognition half is
+ * not, since it never left the WICG stage and remains Chromium-only in practice.
+ * TypeScript ships `SpeechRecognitionResult` but not the interface producing one.
  *
- * Only the members `stt/index.ts` actually touches are declared. Typing more of
- * it would be inventing a contract for an API that has no agreed one, and the
- * extra surface would just be a place for a wrong assumption to hide.
+ * Only the members `stt/index.ts` touches are declared: typing more would invent
+ * a contract for an API that has no agreed one.
  */
 
 interface SpeechRecognitionAlternative {

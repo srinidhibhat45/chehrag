@@ -1,24 +1,21 @@
 /**
  * Speech-to-text, behind one interface.
  *
- * Sarvam is the implementation the brief asks for and the only one used when a
- * key is configured. `WebSpeechStt` is a fallback with a specific, narrow job:
- * without it, an evaluator who has not been given a Sarvam key sees a voice
- * button that does nothing, and cannot tell a missing key from a broken
- * feature. With it they can hear the interface work and read, in plain text,
- * that they are hearing the browser's recogniser rather than Sarvam.
+ * Sarvam is the primary implementation and the only one used when a key is
+ * configured. `WebSpeechStt` exists so that a deployment without a key still
+ * demonstrates voice rather than showing a button that does nothing.
  *
- * It is never silently substituted. `pickStt` reports which engine it chose and
+ * It is never silently substituted: `pickStt` reports which engine it chose and
  * the UI names it, because "voice works" and "the Sarvam integration works" are
- * different claims and only one of them is the requirement.
+ * different claims.
  *
- * Two real differences the UI has to account for:
+ * Two differences the UI has to account for:
  *
- *   - Web Speech has no language auto-detect worth the name. It is told a
- *     language and hears that language; Sarvam's `auto` genuinely identifies
- *     one of eleven and returns it with the transcript.
+ *   - Web Speech has no meaningful language auto-detect. It is told a language
+ *     and hears that language, where Sarvam's `auto` identifies one of eleven
+ *     and returns it with the transcript.
  *   - Web Speech is Chromium-only in practice, and on Chrome the audio goes to
- *     Google's servers. Which is precisely why it is a fallback and is labelled.
+ *     Google's servers — which is why it is a labelled fallback.
  */
 
 import { SarvamStt, type SttEvent, type SttOptions } from "./sarvam";
@@ -62,8 +59,8 @@ export function pickStt(
 /**
  * `SpeechRecognition` wrapped to look like the Sarvam client.
  *
- * It opens its own microphone stream in parallel with the recogniser's. That
- * looks redundant and is not: the recogniser does not expose its audio, and the
+ * It opens its own microphone stream alongside the recogniser's, which looks
+ * redundant but is not: the recogniser does not expose its audio, and the
  * fireball's envelope needs a `MediaStream`. Browsers share one microphone
  * between both consumers, so this costs a permission check and nothing else.
  */
@@ -84,7 +81,7 @@ export class WebSpeechStt implements SttEngine {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      // The recogniser can still work; only the fire's envelope is lost.
+      // The recogniser still works; only the fire's envelope is lost.
       this.stream = null;
     }
 
@@ -92,8 +89,8 @@ export class WebSpeechStt implements SttEngine {
     this.rec = rec;
     rec.continuous = true;
     rec.interimResults = true;
-    // "auto" is not a thing here — the recogniser must be told. Hindi is the
-    // corpus language, so it is the sensible default when nothing is chosen.
+    // No "auto" here: the recogniser must be told. Hindi is the corpus
+    // language, so it is the default when nothing is chosen.
     rec.lang = !this.opts.languageCode || this.opts.languageCode === "auto"
       ? "hi-IN" : this.opts.languageCode;
 
@@ -112,8 +109,8 @@ export class WebSpeechStt implements SttEngine {
       this.opts.onEvent({ type: "error", message: `browser speech: ${e.error}` });
     };
     rec.onend = () => {
-      // Chrome ends the session on its own after a pause. Restart unless the
-      // user actually stopped, or dictation dies mid-sentence.
+      // Chrome ends the session on its own after a pause, so restart unless
+      // the user stopped; otherwise dictation dies mid-sentence.
       if (!this.stopped) { try { rec.start(); } catch { /* already running */ } return; }
       this.opts.onEvent({ type: "closed" });
     };

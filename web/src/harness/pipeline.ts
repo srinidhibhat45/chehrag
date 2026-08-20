@@ -1,22 +1,14 @@
 /**
  * Stage-based orchestration harness.
  *
- * Requirement 5 asks for structured orchestration rather than one prompt-in /
- * text-out call. Concretely that means every unit of work is a declared Stage
- * with its own contract:
+ * Every unit of work is a declared Stage with its own contract: a typed input
+ * and output, a latency budget, a retry policy, a declared failure behaviour
+ * (FAIL aborts, DEGRADE falls back), and telemetry either way.
  *
- *   - a typed input and output
- *   - a latency budget it is not allowed to exceed
- *   - a retry policy
- *   - a declared behaviour on failure: FAIL (abort) or DEGRADE (fall back)
- *   - telemetry recorded whether it succeeds or not
- *
- * The design constraint that shapes everything: we are graded on P100, so the
- * pipeline must have a *bounded* worst case. A stage that can hang has no
- * bounded worst case, so every stage carries a budget and the pipeline carries a
- * global deadline. When the deadline is near, remaining optional stages are
- * skipped rather than run and abandoned -- an answer slightly less polished is
- * strictly better than a blown budget.
+ * The constraint that shapes all of it is a bounded worst case. A stage that can
+ * hang has none, so every stage carries a budget and the pipeline carries a
+ * global deadline. Near the deadline, remaining optional stages are skipped
+ * rather than started and abandoned.
  */
 
 export type StageOutcome = "ok" | "degraded" | "skipped" | "failed";
@@ -64,15 +56,13 @@ export class StageError extends Error {
   }
 }
 
-/** Rejects if `p` outruns `ms`. Synchronous stages bypass this entirely. */
 /**
- * A stage that ran out of budget, as opposed to one that failed.
+ * A stage that ran out of budget, as distinct from one that failed.
  *
- * The distinction is the whole reason this class exists. A transient fault —
- * an ONNX session failing under memory pressure — is worth retrying, because
- * the second attempt genuinely might succeed. A timeout on deterministic work
- * is not: the stage was asked to do a fixed amount of work, and it did not fit.
- * Running it again produces the same overrun and pays for it twice.
+ * The distinction drives the retry policy. A transient fault — an ONNX session
+ * failing under memory pressure — is worth retrying. A timeout on deterministic
+ * work is not: the stage was given a fixed amount of work that did not fit, and
+ * a second attempt overruns identically at double the price.
  */
 export class StageTimeout extends Error {
   constructor(name: string, ms: number) {
@@ -81,6 +71,7 @@ export class StageTimeout extends Error {
   }
 }
 
+/** Rejects if `p` outruns `ms`. Synchronous stages bypass this entirely. */
 function withTimeout<T>(p: Promise<T>, ms: number, name: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new StageTimeout(name, ms)), ms);
@@ -135,8 +126,8 @@ export class Pipeline {
     for (const stage of this.stages) {
       const sStart = now();
 
-      // Deadline-aware skip. Running an optional stage we cannot finish wastes
-      // budget that the remaining required stages need.
+      // Deadline-aware skip. An optional stage that cannot finish would spend
+      // budget the remaining required stages need.
       if (stage.minRemainingMs != null && ctx.remaining() < stage.minRemainingMs) {
         telemetry.push({
           name: stage.name, outcome: "skipped", ms: 0, attempts: 0,
@@ -166,33 +157,18 @@ export class Pipeline {
           lastErr = err;
           if (attempts >= maxAttempts) break;
 
-          // A timeout is never retried, however much budget is left.
-          //
-          // Retries exist for transient faults. A stage that timed out did not
-          // hit a fault — it was handed a fixed amount of deterministic work
-          // that did not fit, and running it again produces the identical
-          // overrun at double the price.
-          //
-          // Found by bench/multilingual.ts: a long Assamese query embedded in
-          // ~61ms against a 60ms stage budget, timed out with 139ms of the
-          // global budget still free, retried, spent another ~61ms, and then
-          // failed the whole pipeline under `onError: "FAIL"`. So a query that
-          // was merely slow was turned into a 122.9ms *error* — the worst of
-          // both outcomes, and the single worst number in a 3,000-query sweep.
+          // A timeout is never retried, however much budget is left. Retries
+          // are for transient faults; deterministic work that did not fit will
+          // not fit the second time either, and the retry turns a merely slow
+          // query into a doubly-slow error.
           if (err instanceof StageTimeout) {
             break;
           }
 
-          // Never start an attempt that cannot finish. A retry after a failure
-          // late in the budget is the worst case for a hard deadline: the first
-          // attempt already spent much of what was left, and the second spends
-          // it again, so the stage overshoots precisely when the budget was
-          // tightest.
-          //
-          // `bench/deadline.ts` found this — single-query overruns at 12-15ms
-          // budgets that the retrieval plan could not explain, because the time
-          // went to a second embedding pass nobody had budget for. Retries are
-          // for transient faults with room to spare, not for deadline misses.
+          // Never start an attempt that cannot finish. A retry late in the
+          // budget is the worst case for a hard deadline: the first attempt
+          // already spent most of what was left and the second spends it again,
+          // overshooting exactly when the budget is tightest.
           const left = ctx.remaining();
           if (left <= 0 || left < RETRY_MIN_REMAINING_MS) {
             lastErr = new Error(

@@ -1,19 +1,17 @@
 /**
  * Client-side chunking for user-added sources.
  *
- * A TypeScript port of `pipeline/src/chunking/strategies.py`, deliberately kept
- * strategy-for-strategy identical. User sources are fused with the shipped
- * corpus in the same RRF pass, and RRF compares *ranks across strategies* — so
- * if a user chunk were produced by a different rule than a corpus chunk with the
- * same strategy label, the fusion weights would be applied to two different
- * things and the ranking would be quietly wrong.
+ * A TypeScript port of `pipeline/src/chunking/strategies.py`, kept
+ * strategy-for-strategy identical. User sources fuse with the shipped corpus in
+ * the same RRF pass, and RRF compares ranks across strategies — so a user chunk
+ * produced by a different rule than a corpus chunk with the same strategy label
+ * would have the fusion weights applied to two different things.
  *
- * One real difference, and it is not cosmetic. The corpus is MS MARCO passages,
- * which arrive pre-cut at ~317 characters — already chunk-sized, which is why
- * the pipeline's `whole` strategy is a no-op splitter. A user's PDF is not. So
- * this file adds a passage-forming step in front: user text is first cut into
- * passage-sized units, and only then do the six strategies run over those units,
- * exactly as they do over MS MARCO passages.
+ * One substantive difference. MS MARCO passages arrive pre-cut at ~317
+ * characters, already chunk-sized, which is why the pipeline's `whole` strategy
+ * is a no-op splitter. A user's PDF is not, so this file adds a passage-forming
+ * step in front: text is cut into passage-sized units, and the six strategies
+ * then run over those units exactly as they do over MS MARCO passages.
  */
 
 /** Sentence terminators: Devanagari danda plus ASCII. Matches `_SENT_RE`. */
@@ -65,11 +63,11 @@ function headingOf(line: string): string | null {
 /**
  * Cut raw document text into passage-sized units.
  *
- * Paragraph boundaries are respected first — they are real semantic joints the
- * author put there. Only paragraphs that overshoot get cut on sentence
- * boundaries, and only sentences that overshoot get cut on whitespace. The
- * ladder means a well-formed document is never cut mid-thought, and a
- * pathological one (a 50 kB single paragraph, a minified file) still terminates.
+ * Paragraph boundaries come first — they are semantic joints the author put
+ * there. Only paragraphs that overshoot are cut on sentence boundaries, and only
+ * sentences that overshoot are cut on whitespace. The ladder keeps a well-formed
+ * document from being cut mid-thought while still terminating on a pathological
+ * one (a 50 kB single paragraph, a minified file).
  */
 export function toPassages(text: string): Passage[] {
   const out: Passage[] = [];
@@ -85,7 +83,7 @@ export function toPassages(text: string): Passage[] {
   for (const block of text.split(/\n{2,}/)) {
     const lines = block.split("\n");
     // A lone line that reads as a heading retitles what follows rather than
-    // becoming a useless 4-word passage of its own.
+    // becoming a four-word passage of its own.
     if (lines.length === 1) {
       const h = headingOf(lines[0]);
       if (h) { flush(); heading = h; continue; }
@@ -177,9 +175,9 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
     }
 
     // 4. contextual — same span, richer embedding text. Numerics and Latin-script
-    //    tokens are re-stated in a header because dense vectors handle them worst;
-    //    for a user document the section heading and title go in too, which is the
-    //    anaphora the bare passage lost ("it doubled in Q3" — what did?).
+    //    tokens are restated in a header because dense vectors handle them worst.
+    //    For a user document the section heading and title go in too, restoring
+    //    the anaphora a bare passage lost ("it doubled in Q3" — what did?).
     const nums = uniq(text.match(NUMERIC) ?? []).slice(0, 8);
     const latin = uniq(text.match(LATIN_RUN) ?? []).slice(0, 8);
     const bits: string[] = [title];
@@ -189,9 +187,8 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
     push("contextual", `${bits.join(" | ")}\n${text}`, i);
 
     // 5. semantic — group adjacent sentences that share vocabulary, so a complete
-    //    idea stays in one vector. Low yield on ~3-sentence passages, which the
-    //    pipeline measured rather than assumed; kept for parity and for the longer
-    //    passages that user documents actually contain.
+    //    idea stays in one vector. Low yield on ~3-sentence passages; kept for
+    //    parity and for the longer passages user documents contain.
     if (sents.length > 2) {
       for (const g of semanticGroups(sents)) if (g.length > 1) push("semantic", g.join(" "), i);
     }
@@ -215,10 +212,10 @@ function uniq(xs: string[]): string[] {
 /**
  * Split a sentence list where consecutive sentences stop sharing vocabulary.
  *
- * Jaccard over content tokens, not embeddings: an embedding-based split would
- * cost one forward pass per sentence *before* we know which chunks we even want,
- * which is the expensive half of ingestion doubled for a marginal gain the
- * pipeline already measured as small.
+ * Jaccard over content tokens rather than embeddings: an embedding-based split
+ * would cost one forward pass per sentence before the chunks are even known,
+ * doubling the expensive half of ingestion for a gain the pipeline measured as
+ * small.
  */
 function semanticGroups(sents: string[], threshold = 0.12): string[][] {
   const toks = sents.map((s) => new Set(

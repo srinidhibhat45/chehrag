@@ -1,36 +1,27 @@
 /**
  * The conversation.
  *
- * Answers are messages in a thread, not a single result panel that gets
- * overwritten. That is not a cosmetic choice: the interesting comparisons in
- * this system are *between* answers — this question was refused and that one
- * was not, this one took 6 ms and that one 40 — and a panel that replaces
- * itself destroys the only evidence a person has for judging it.
+ * Answers are messages in a thread rather than one result panel that gets
+ * overwritten. The interesting comparisons here are between answers — this
+ * question was refused and that one was not, this took 6 ms and that took 40 —
+ * and a panel that replaces itself destroys the evidence for both.
  *
- * WHAT AN ANSWER IS, HERE. The bubble holds a written answer to the question:
- * "You are 45", not the line of the CV that says so. Under it, always visible
- * and never behind a disclosure triangle, is the document that answer came
- * from. Those two things together are the product. The retrieved passages are
- * still one click away underneath, because a claim about a document should be
- * checkable against the document — but they are evidence, not the answer, and
- * the previous version of this file had them the other way around.
+ * The bubble holds a written answer to the question, and directly under it,
+ * never behind a disclosure triangle, the document that answer came from. The
+ * retrieved passages sit one click below: evidence, not the answer.
  *
- * The latency reading rides with the answer it describes, as a small chip in
- * the message footer. It used to be a whole screen of its own, which had the
- * pathology of any dedicated metrics tab: the number was somewhere you had to
- * go and look, at which point it was no longer attached to the thing it was a
- * fact about. Expanded, the chip shows the per-stage breakdown inline.
+ * The latency reading rides with the answer it describes, as a chip in the
+ * message footer rather than on a metrics screen of its own, where it would no
+ * longer be attached to the thing it is a fact about. Expanding it shows the
+ * per-stage breakdown inline.
  *
- * Retrieval time and generation time are shown as two numbers, never summed.
- * The 200 ms guarantee is about retrieval, which runs here in the browser; the
- * answer is written by a model over the network and takes as long as it takes.
- * One combined figure would either break a promise the system actually keeps or
- * hide a cost the person is actually paying.
+ * Retrieval and generation are two numbers and are never summed: retrieval runs
+ * in the browser under the 200 ms budget, and the answer is written by a model
+ * over the network. One combined figure would misreport both.
  *
  * Everything is built with DOM calls rather than innerHTML. Passage text is
- * corpus data and user-supplied document text, and the one interesting way to
- * attack a system like this is to get markup out of a retrieved passage and
- * into the page.
+ * corpus data and user-supplied document text, and the obvious attack on a
+ * system like this is markup escaping a retrieved passage into the page.
  */
 
 import type { RagAnswer } from "../harness/rag";
@@ -64,7 +55,7 @@ export interface BotHandle {
   endGeneration(ms: number): void;
   /**
    * Generation did not produce a usable answer. `note` says why in the user's
-   * terms; the retrieved passage is shown instead, labelled as a quotation.
+   * terms, and the retrieved passage is shown instead, labelled as a quotation.
    */
   fallBackToExtract(note: string): void;
   /** Show which voice spoke, or why none did. */
@@ -108,9 +99,9 @@ export class Chat {
   /**
    * Append a placeholder for an answer that is still being computed.
    *
-   * The placeholder exists because retrieval is fast enough that a spinner
-   * would flash — but not so fast that nothing at all should acknowledge the
-   * question. The wick pulses; that is the entire loading state.
+   * Retrieval is fast enough that a spinner would only flash, but not so fast
+   * that nothing should acknowledge the question. The wick pulses; that is the
+   * whole loading state.
    */
   addPending(): BotHandle {
     this.clearWelcome();
@@ -126,15 +117,15 @@ export class Chat {
     this.thread.append(msg);
     this.scroll();
 
-    // Captured on resolve so the generation callbacks below can reach the
-    // pieces they need to update without re-querying the DOM each token.
+    // Captured on resolve, so the generation callbacks below can reach what
+    // they update without re-querying the DOM on every token.
     let answerEl: HTMLElement = text;
     let extractive = "";
     let generated = "";
     let streaming = false;
     let metaEl: HTMLElement | null = null;
 
-    /** The Speak control only appears once there is a settled answer to speak. */
+    /** Appears only once there is a settled answer to speak. */
     const addSpeakButton = () => {
       if (!metaEl || metaEl.querySelector(".speak-btn")) return;
       const speak = metaButton("Speak");
@@ -195,9 +186,8 @@ export class Chat {
         generated = "";
         delete answerEl.dataset.state;
         answerEl.textContent = extractive;
-        // Marked as a quotation rather than dressed up as an answer. Showing a
-        // raw passage without saying it is one is the exact failure this whole
-        // change exists to undo — it just fails silently instead of loudly.
+        // Marked as a quotation rather than presented as an answer: a raw
+        // passage shown without saying so is a wrong answer that looks right.
         answerEl.dataset.quoted = "1";
         const why = div("answer-note");
         why.textContent = note;
@@ -244,10 +234,9 @@ export class Chat {
     const text = document.createElement("p");
     text.className = "answer-text";
     if (answered && opts.generating) {
-      // Retrieval is done and generation has not produced a token yet. Saying
-      // "Reading…" is true — the passages exist and are being read — and it
-      // avoids the alternative of flashing the raw passage on screen for half a
-      // second before replacing it with the answer.
+      // Retrieval is done and generation has not produced a token yet. The
+      // alternative is flashing the raw passage on screen for half a second
+      // before replacing it with the answer.
       text.textContent = "Reading your sources…";
       text.dataset.state = "waiting";
     } else {
@@ -261,15 +250,14 @@ export class Chat {
       body.append(why);
     }
 
-    // Nothing was searched, so there is nothing to time, cite or speak. A
-    // stopwatch here would be advertising speed for doing no work.
+    // Nothing was searched, so there is nothing to time, cite or speak.
     if (r.refusal === "NO_SOURCES") return { answerEl: text, metaEl: null };
 
     // -- attribution -------------------------------------------------------
     //
-    // Above the metadata row and outside any disclosure, because "which
-    // document told you that" is not a diagnostic — it is half of what makes
-    // an answer usable. It doubles as the control that opens the passages.
+    // Above the metadata row and outside any disclosure: which document said so
+    // is not a diagnostic, it is half of what makes the answer usable. It
+    // doubles as the control that opens the passages.
     let cites: HTMLElement | null = null;
     if (r.citations.length) {
       cites = this.citesPanel(r);
@@ -331,9 +319,8 @@ export class Chat {
   /**
    * The per-stage breakdown, plus the 200 ms track.
    *
-   * The track is always exactly 200 ms wide. That is the point: it is read
-   * against the requirement, not against the other bars, so a fast answer looks
-   * fast instead of looking like a full bar.
+   * The track is always exactly 200 ms wide, so it reads against the budget
+   * rather than against the other bars and a fast answer looks fast.
    */
   private stagesPanel(
     r: RagAnswer,
@@ -423,8 +410,8 @@ export class Chat {
     return panel;
   }
 
-  /** Keep the newest message in view without yanking the user off a citation
-   *  they are mid-read of. */
+  /** Keep the newest message in view without pulling the reader off a citation
+   *  they are part-way through. */
   private scroll(): void {
     const nearBottom =
       this.thread.scrollHeight - this.thread.scrollTop - this.thread.clientHeight < 220;
@@ -434,10 +421,8 @@ export class Chat {
 
 // -- attribution helpers -----------------------------------------------------
 
-/**
- * Named, not described. "the sample corpus" tells a reader nothing they can
- * check; the dataset has a name and citing it is the point of a citation.
- */
+/** Named rather than described: the dataset has a name, and citing it is the
+ *  point of a citation. */
 function sourceLabel(s: { kind: "corpus" | "user"; title?: string }): string {
   return s.kind === "user" ? (s.title || "your source") : "MS MARCO-XI";
 }
@@ -445,9 +430,9 @@ function sourceLabel(s: { kind: "corpus" | "user"; title?: string }): string {
 /**
  * The document names behind an answer, de-duplicated in rank order.
  *
- * Named rather than counted: "from biodata.pdf" is a fact someone can act on,
- * "from 3 sources" is a number. Past two documents it becomes a count anyway,
- * because a line of six filenames is no longer a sentence.
+ * Named rather than counted — "from biodata.pdf" is actionable where "from 3
+ * sources" is not. Past two documents it becomes a count anyway, since a line of
+ * six filenames stops being a sentence.
  */
 function sourceLabels(r: RagAnswer): Node[] {
   const seen: string[] = [];

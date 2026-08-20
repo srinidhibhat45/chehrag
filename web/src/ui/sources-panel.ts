@@ -1,19 +1,16 @@
 /**
  * The sources rail.
  *
- * Three ways in — paste, file, link — and one list out. The list is the honest
- * part of the feature: it shows how many passages and chunks each source
- * actually produced, because "added successfully" tells the user nothing about
- * whether the PDF they dropped had a text layer.
+ * Three ways in — paste, file, link — and one list out. The list reports how
+ * many passages and chunks each source produced, because "added successfully"
+ * says nothing about whether a dropped PDF had a text layer.
  *
- * It is a permanent rail rather than a modal drawer, which is a change with a
- * reason behind it. In a notebook the sources are the subject, not a setting:
- * you want to see what is loaded while you read the answer, and you want to be
- * able to switch one off and ask again without losing your place. A modal makes
- * both of those a round trip.
+ * A permanent rail rather than a modal drawer: the sources are the subject, so
+ * they stay visible while an answer is read, and one can be switched off and the
+ * question asked again without losing your place.
  *
- * Rendering is a full rebuild of the list on every change. With a handful of
- * sources that is cheaper than diffing, and it happens off the query path.
+ * Rendering rebuilds the list on every change. With a handful of sources that is
+ * cheaper than diffing, and it happens off the query path.
  */
 
 import type { Source, SourceStore } from "../sources/store";
@@ -90,9 +87,9 @@ export class SourcesPanel {
       void this.addFiles(files);
     });
 
-    // The whole rail is a drop target, not just the dashed box — a user who
-    // drags a file at the panel should not have to aim. Dropping also opens the
-    // add panel if it was collapsed, so the progress is visible.
+    // The whole rail is a drop target, not just the dashed box, so a dragged
+    // file does not have to be aimed. Dropping also opens the add panel if it
+    // was collapsed, so progress is visible.
     for (const ev of ["dragenter", "dragover"] as const) {
       this.rail.addEventListener(ev, (e) => {
         e.preventDefault();
@@ -119,8 +116,8 @@ export class SourcesPanel {
 
   private async addFiles(files: File[]): Promise<void> {
     this.clearError();
-    // Sequential, not parallel: they all queue behind the same encoder anyway,
-    // and one at a time means the progress bars mean something.
+    // Sequential rather than parallel: they queue behind the same encoder
+    // either way, and one at a time keeps the progress bars meaningful.
     for (const f of files) {
       try {
         await this.store.addFile(f);

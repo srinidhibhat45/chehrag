@@ -1,29 +1,26 @@
 /**
- * IVF + binary-quantized chunk index, built for a hard P100 budget.
+ * IVF + binary-quantised chunk index, built for a hard P100 budget.
  *
- * Why not brute force: a full Hamming scan over ~810k chunk vectors costs tens
- * of ms in JS. Affordable on average, lethal at P100 where one GC pause lands
- * on top of it.
+ * Not brute force: a full Hamming scan over ~810k chunk vectors costs tens of ms
+ * in JS — affordable on average, lethal at P100 with a GC pause on top.
  *
- * Why not HNSW: the graph is large to ship and its traversal has a long,
- * data-dependent tail -- the wrong shape when the grade is the worst query, not
- * the median.
+ * Not HNSW: the graph is large to ship and its traversal has a long,
+ * data-dependent tail, which is the wrong shape when the worst query is what
+ * matters.
  *
- * IVF gives a *bounded* amount of work per query: probe a fixed number of
- * clusters, scan a capped number of candidates. Latency becomes near-constant
- * and the tail flattens, which is the property we actually need.
+ * IVF bounds the work per query: probe a fixed number of clusters, scan a capped
+ * number of candidates. Latency goes near-constant and the tail flattens.
  *
  * Two-stage precision, split across this file and the caller:
- *   stage 1 (here)   binary codes + Hamming -- cheap, wide net, per strategy
- *   stage 2 (caller) int8 dot product on FUSED PASSAGE candidates only
+ *   stage 1 (here)   binary codes + Hamming — cheap, wide net, per strategy
+ *   stage 2 (caller) int8 dot product on fused passage candidates only
  *
- * Stage 2 deliberately lives at passage level rather than chunk level. Per-chunk
- * int8 vectors would be 810k x 192 = 155 MB to ship; per-passage is 99k x 192 =
- * 19 MB. Since fusion resolves to passages anyway, rescoring chunks would be
- * paying 8x the bandwidth to rank things we are about to collapse.
+ * Stage 2 is at passage level rather than chunk level: per-chunk int8 vectors
+ * would be 810k x 192 = 155 MB to ship against 99k x 192 = 19 MB per passage,
+ * and fusion collapses to passages anyway.
  *
  * P100 discipline enforced here:
- *   - every buffer allocated at construction; steady-state search allocates nothing
+ *   - every buffer allocated at construction; steady-state search allocates none
  *   - candidate count hard-capped, so work per query has a ceiling
  *   - no closures, iterators, or dynamic arrays in the hot loop
  */
@@ -42,10 +39,10 @@ export interface IvfIndexData {
 /**
  * popcount for one 32-bit word, branch-free.
  *
- * `Math.imul` and `>>>` are load-bearing, not style. Plain `*` produces a JS
- * double that exceeds 2^31 for large inputs, and the following `>>` then does a
- * lossy ToInt32 conversion and returns a wrong (often negative) count. That
- * failure is silent: retrieval still runs, it just ranks by garbage.
+ * `Math.imul` and `>>>` are correctness, not style: plain `*` produces a double
+ * that exceeds 2^31 for large inputs, and the following shift then does a lossy
+ * ToInt32 conversion and returns a wrong, often negative count. Retrieval keeps
+ * running and ranks by garbage.
  */
 function popcnt(x: number): number {
   x = x - ((x >>> 1) & 0x55555555);
@@ -136,8 +133,8 @@ export class IvfIndex {
       cs[c] = s;
       this.probeOrder[c] = c;
     }
-    // Partial selection: nprobe is small, and its cost is fixed rather than
-    // data-dependent — which matters more than raw speed at P100.
+    // Partial selection: nprobe is small and its cost is fixed rather than
+    // data-dependent, which matters more than raw speed at P100.
     const np = Math.min(nprobe, d.nlist);
     for (let i = 0; i < np; i++) {
       let best = i;
@@ -172,8 +169,8 @@ export class IvfIndex {
     if (nc === 0) { this.result.n = 0; return this.result; }
 
     // ---- stage 2: collapse to top-K distinct passages ----------------------
-    // Partial selection sort to K*4 rather than a full sort: we only need enough
-    // of the head to find K distinct parents, and bounded work beats optimal work.
+    // Partial selection sort to K*4 rather than a full sort: only enough of the
+    // head is needed to find K distinct parents, and bounded beats optimal here.
     const need = Math.min(nc, K * 4);
     for (let i = 0; i < need; i++) {
       let best = i;
@@ -199,12 +196,12 @@ export class IvfIndex {
 }
 
 /**
- * Exact-ish rescoring of fused passage candidates using int8 passage vectors.
+ * Rescoring of fused passage candidates using int8 passage vectors.
  *
- * Binary codes throw away magnitude, which is fine for casting a wide net and
- * not fine for the final ordering or for a confidence threshold. This restores
- * real cosine similarity over the few dozen passages that survived fusion, and
- * that similarity is what guardrail gate 2 thresholds on.
+ * Binary codes discard magnitude, which is fine for casting a wide net and not
+ * fine for final ordering or for a confidence threshold. This restores cosine
+ * similarity over the few dozen passages that survived fusion, and that value is
+ * what gate 2 thresholds on.
  */
 export class PassageRescorer {
   private qInt8: Int8Array;

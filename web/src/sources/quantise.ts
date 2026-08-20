@@ -1,22 +1,20 @@
 /**
  * Quantisation for user-source vectors.
  *
- * These must produce byte-identical output to `pipeline/src/build_index.py`
- * (`project`, `binarise`, and the int8 passage quantiser). User chunks are
- * fused with corpus chunks in one RRF pass and thresholded by one calibrated
- * confidence value, so if the two were quantised differently the guardrail would
- * be reading two incompatible score scales and would over- or under-refuse on
- * whichever side drifted.
+ * Must produce byte-identical output to `pipeline/src/build_index.py`
+ * (`project`, `binarise`, and the int8 passage quantiser). User and corpus
+ * chunks fuse in one RRF pass under one calibrated confidence value, so a
+ * difference here would leave the guardrail reading two incompatible score
+ * scales.
  *
- * Kept in its own module because the store needs the exact bytes twice — once
- * to search and once to persist — and doing it inside the index would mean
- * doing it twice.
+ * Its own module because the store needs the exact bytes twice — once to search
+ * and once to persist — and doing this inside the index would quantise twice.
  */
 
 import type { Strategy } from "./chunk";
 
-/** Stable ids for persistence. Append only — never reorder, or every stored
- *  source silently re-labels its chunks and the fusion weights land wrong. */
+/** Stable ids for persistence. Append only: reordering re-labels the chunks of
+ *  every stored source, and the fusion weights then land on the wrong ones. */
 export const STRATEGY_NAMES = [
   "whole", "sentence", "sliding", "contextual", "semantic", "document",
 ] as const satisfies readonly Strategy[];
@@ -69,10 +67,10 @@ export function binarise(vec: Float32Array, dim: number, codeWords: number,
 /**
  * Per-vector int8 quantisation.
  *
- * The scale is the vector's own maximum absolute value, not a global one — a
- * global scale would flatten low-magnitude vectors into near-zero codes. The
- * returned scale is pre-multiplied by 127 so the scorer's `dot / 16129 * scale`
- * lands on cosine, matching PassageRescorer.
+ * The scale is the vector's own maximum absolute value rather than a global one,
+ * which would flatten low-magnitude vectors into near-zero codes. The returned
+ * scale is pre-multiplied by 127 so the scorer's `dot / 16129 * scale` lands on
+ * cosine, matching `PassageRescorer`.
  */
 export function quantiseInt8(vec: Float32Array, dim: number,
                              out: Int8Array, offset: number): number {

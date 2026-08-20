@@ -1,16 +1,15 @@
 /**
- * Sarvam speech-to-text client (requirement 1).
+ * Sarvam speech-to-text client.
  *
- * Streaming is the primary path because partial transcripts are what let
- * retrieval start *while the user is still speaking*. By the time someone
- * finishes a sentence, the answer for its prefix is already computed. The
- * perceived latency is then bounded by how fast they stop talking, not by us.
+ * Streaming is the primary path, because partial transcripts let retrieval start
+ * while the user is still speaking: by the time a sentence ends, the answer for
+ * its prefix is already computed.
  *
- * The API key never reaches the browser: the Worker terminates this socket and
- * opens an authenticated one upstream (browsers cannot set custom headers on a
- * WebSocket handshake, so a proxy is required regardless of secrecy).
+ * The API key never reaches the browser. The Worker terminates this socket and
+ * opens an authenticated one upstream — browsers cannot set custom headers on a
+ * WebSocket handshake, so a proxy is required regardless of secrecy.
  *
- * Falls back to batch REST when the socket cannot be established — corporate
+ * Falls back to batch REST when the socket cannot be established: corporate
  * proxies and some mobile networks kill long-lived WebSockets.
  */
 
@@ -66,9 +65,8 @@ export class SarvamStt {
 
   constructor(private readonly opts: SttOptions) {}
 
-  /** The live microphone stream, once `start()` has resolved.
-   *  Exposed so the lamp can pulse with the speaker's voice; nothing in the
-   *  transcription path depends on it. */
+  /** The live microphone stream, once `start()` has resolved. Exposed so the
+   *  lamp can pulse with the voice; transcription does not depend on it. */
   get micStream(): MediaStream | null { return this.stream; }
 
   async start(): Promise<void> {
@@ -82,13 +80,10 @@ export class SarvamStt {
     } catch (err) {
       // WebSocket blocked or upstream refused — degrade rather than fail.
       //
-      // A `notice`, emphatically not an `error`. This is the fallback doing its
-      // job: the microphone is open, batch capture is about to start, and the
-      // only thing lost is partial transcripts. Reporting it as an error made
-      // the UI tear the engine down mid-`start()` — destroying the very
-      // fallback this branch had just set up, and surfacing the wreckage as
-      // "Cannot read properties of null (reading 'micStream')" instead of the
-      // message that says what actually happened.
+      // A `notice`, not an `error`: the microphone is open, batch capture is
+      // about to start, and only partial transcripts are lost. An `error` here
+      // makes the UI tear the engine down mid-`start()`, destroying the
+      // fallback this branch has just set up.
       this.opts.onEvent({
         type: "notice",
         message: `Live transcription unavailable (${err instanceof Error ? err.message : err}) — recording, and transcribing when you stop.`,
@@ -136,14 +131,14 @@ export class SarvamStt {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ event: "ping" }));
     }, 15000);
 
-    // AudioContext resamples to 16 kHz for us — the browser's resampler is
-    // better than anything worth hand-rolling here.
+    // AudioContext resamples to 16 kHz. The browser's resampler beats anything
+    // worth hand-rolling here.
     const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
     this.ctx = ctx;
     const src = ctx.createMediaStreamSource(this.stream!);
 
-    // ScriptProcessor is deprecated but universally available and adequate:
-    // this is capture-only, and a dropped frame costs a syllable, not a crash.
+    // ScriptProcessor is deprecated but universally available and adequate for
+    // capture-only work, where a dropped frame costs a syllable.
     const proc = ctx.createScriptProcessor(4096, 1, 1);
     this.node = proc;
     proc.onaudioprocess = (e) => {
@@ -156,9 +151,9 @@ export class SarvamStt {
   }
 
   private startBatch(): void {
-    // `stop()` may already have run and released the tracks — a listener can
-    // call it from inside the notice above. Without this the constructor
-    // throws on a null stream and takes the whole `start()` down with it.
+    // `stop()` may already have run and released the tracks: a listener can
+    // call it from inside the notice above. Without this the constructor throws
+    // on a null stream and takes `start()` down with it.
     if (!this.stream) return;
     const rec = new MediaRecorder(this.stream, { mimeType: "audio/webm" });
     this.recorder = rec;

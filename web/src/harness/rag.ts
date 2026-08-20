@@ -1,22 +1,19 @@
 /**
- * The RAG pipeline itself, expressed as harness stages.
+ * The RAG pipeline, expressed as harness stages.
  *
- * Everything here is inside the 200ms budget. The LLM synthesis path is
- * deliberately NOT here — it runs afterwards, off the clock, and its result
- * replaces the extractive answer in the UI only once it arrives and passes the
- * grounding gate.
+ * Everything here is inside the 200ms budget. LLM synthesis is not: it runs
+ * afterwards, off the clock, and replaces the extractive answer in the UI only
+ * once it arrives and passes the grounding gate.
  *
- * Stage budgets are set well above measured cost so that a slow machine
- * degrades gracefully rather than failing. The global budget is what actually
- * enforces the requirement, and `deadline.ts` is what makes it a *hard* cap
- * rather than an aspiration: when time runs short the retrieval stage reduces
- * its own work instead of overrunning.
+ * Stage budgets sit well above measured cost so a slow machine degrades rather
+ * than failing. The global budget is what enforces the cap, and `deadline.ts`
+ * makes it hard rather than aspirational: when time runs short the retrieval
+ * stage reduces its own work instead of overrunning.
  *
- * Two corpora, one ranking. The shipped MS MARCO index and the user's own
- * sources are searched separately — they need different structures, IVF versus
- * flat — but their hits are fused in a single RRF pass and thresholded by a
- * single calibrated confidence. That only holds because both sides quantise
- * identically; see sources/quantise.ts.
+ * Two corpora, one ranking. The shipped MS MARCO index and the user's sources
+ * are searched separately — IVF versus flat — but their hits fuse in a single
+ * RRF pass under one calibrated confidence. That only holds because both sides
+ * quantise identically; see `sources/quantise.ts`.
  */
 
 import { Pipeline, type StageTelemetry } from "./pipeline";
@@ -38,9 +35,8 @@ export interface Encoder {
  * User passages live above this ordinal in the shared id space.
  *
  * Fusion, rescoring and citation all key on one integer, so corpus and user
- * passages must not collide. The corpus is ~99k passages and the format caps
- * far below 10M, so a fixed offset is simpler and faster than a tagged pair —
- * one comparison rather than an object dereference in the hot loop.
+ * passages must not collide. A fixed offset is one comparison in the hot loop
+ * where a tagged pair would be an object dereference.
  */
 export const USER_BASE = 10_000_000;
 
@@ -69,30 +65,21 @@ export interface RagAnswer {
   totalMs: number;
   /** What retrieval was actually allowed to do, after deadline pressure. */
   plan: RetrievalPlan;
-  /** Set when the answer came from cache — reported separately so cached runs
-   *  never flatter the latency numbers. */
+  /** Set when the answer came from cache, so cached runs can be excluded from
+   *  the latency numbers. */
   cached?: boolean;
   /**
    * Fused passage ids in rank order, populated whether or not the answer
    * survived the guardrails.
    *
-   * `citations` is deliberately empty on a refusal — the user must not be shown
-   * evidence for an answer the system declined to give. But evaluation needs
-   * the opposite: "retrieval found the right passage and the gate rejected it"
-   * and "retrieval never found it" are completely different failures, and with
-   * only `citations` they are indistinguishable. This field is what makes the
-   * multilingual stress test able to tell them apart.
+   * `citations` is empty on a refusal — the user must not be shown evidence for
+   * an answer that was declined. Evaluation needs the opposite: "found it and
+   * the gate rejected it" and "never found it" are different failures, and
+   * `citations` alone cannot distinguish them.
    */
   retrieved?: number[];
-  /**
-   * The four signals gate 2 actually decided on.
-   *
-   * Carried on the answer, not just inside the gate, because "it refused" and
-   * "it refused because the score was 0.435 against a threshold of 0.4788
-   * while three strategies agreed" are different amounts of information, and
-   * only the second one can be argued with. Populated on refusals too — that
-   * is the case where it matters.
-   */
+  /** The four signals gate 2 decided on. Populated on refusals too, which is
+   *  where they matter. */
   signals?: RetrievalSignals;
 }
 
@@ -117,7 +104,7 @@ export const DEFAULT_CONFIG: RagConfig = {
 /**
  * Warm-up set: both scripts, short and long, question and fragment.
  * Deliberately not real corpus queries — the cache is cleared afterwards, but
- * warming on real questions would make the first genuine ask suspiciously fast.
+ * warming on real questions would make the first genuine ask artificially fast.
  */
 const WARMUP_QUERIES = [
   "what is a corporation",
@@ -133,42 +120,19 @@ const WARMUP_QUERIES = [
 /**
  * Hard ceiling on the text handed to the encoder.
  *
- * Embedding is the only stage whose cost is set by the *input* rather than by
- * the corpus, and until this existed nothing bounded it. Measured on the
- * parallel query set (`bench/multilingual.ts`):
+ * Embedding is the one stage whose cost is set by the input rather than by the
+ * corpus, and it is paid before the deadline planner runs — so a long enough
+ * query blows the budget with nothing left to degrade. The bound has to be
+ * applied before the cost is incurred.
  *
- *     30 chars ->   2.2 ms embed        <- p50 query
- *     55 chars ->   3.6 ms
- *   2834 chars ->  78.4 ms
- *   6594 chars -> 219.7 ms              <- P100 216 ms, budget blown
+ * Set from measurement rather than from the model's 512-token limit: characters
+ * and tokens diverge across scripts (e5 tokenises Devanagari far better than
+ * Assamese or Kannada) and attention is quadratic in tokens. At 512 characters
+ * the slowest script sits on the embed stage's 60 ms budget and times out; 320
+ * leaves about a third of it spare while still being 4.5x the p99 real query.
  *
- * A single pathological query took the whole system over its 200 ms guarantee.
- * The deadline planner could not save it: the planner degrades *retrieval*,
- * which costs about a millisecond, and by the time it runs the embedding has
- * already been paid for. A budget that only holds for well-formed input is not
- * a budget, so the bound has to be applied before the cost is incurred.
- *
- * The value is set from measurement, not from the model's 512-token limit,
- * because characters and tokens are not the same thing across scripts. e5's
- * vocabulary covers Devanagari far better than Assamese or Kannada, so the same
- * character count becomes very different token counts — and attention cost is
- * quadratic in tokens. Embed cost at the cap, worst script measured:
- *
- *       chars    Node    in-browser (~4x, WASM)
- *         256   7.6 ms          ~30 ms
- *         320   9.3 ms          ~37 ms
- *         512  15.3 ms          ~60 ms   <- brushes the 60 ms stage budget
- *
- * 512 characters put the slowest script right on the embed stage's budget, so
- * it timed out, and the answer failed rather than merely being slow. 320 leaves
- * roughly a third of the stage budget spare on this machine while still being
- * four and a half times the p99 real query (71 characters) and about fifteen
- * seconds of continuous speech.
- *
- * Truncating rather than refusing is deliberate: this is a voice interface, and
- * answering the first part of a rambling question is far more useful than
- * declining all of it. When it fires it is reported, because a silently
- * shortened question is a wrong answer waiting to happen.
+ * Truncating rather than refusing: answering the first part of a rambling
+ * spoken question beats declining all of it. It is reported when it fires.
  */
 export const MAX_QUERY_CHARS = 320;
 
@@ -189,9 +153,8 @@ function sentences(text: string): string[] {
  * Extractive answer: the sentences of the winning passage that best overlap the
  * query, in original order.
  *
- * Grounded by construction — every character is copied from a retrieved
- * passage — which is why the fast path needs no hallucination check. Gate 3
- * exists for the LLM path, where text is generated rather than copied.
+ * Grounded by construction, since every character is copied from a retrieved
+ * passage. Gate 3 exists for the LLM path, where text is generated instead.
  */
 function extractAnswer(query: string, passage: string, maxSentences = 2): string {
   const sents = sentences(passage);
@@ -199,8 +162,8 @@ function extractAnswer(query: string, passage: string, maxSentences = 2): string
   const scored = sents.map((s, i) => ({ s, i, score: lexicalOverlap(query, s) }));
   scored.sort((a, b) => b.score - a.score);
   const picked = scored.slice(0, maxSentences).sort((a, b) => a.i - b.i);
-  // If nothing overlaps at all, the lead sentences are a safer summary than a
-  // confidently-wrong "best match".
+  // With no overlap at all, the lead sentences summarise better than an
+  // arbitrary "best match".
   if (picked.every((p) => p.score === 0)) return sents.slice(0, maxSentences).join(" ");
   return picked.map((p) => p.s).join(" ");
 }
@@ -211,19 +174,12 @@ export class RagEngine {
   private store: SourceStore | null = null;
 
   /**
-   * Whether the shipped MS MARCO corpus takes part in retrieval.
+   * Whether the shipped MS MARCO corpus takes part in retrieval. On by default,
+   * so the app answers from the first question rather than starting empty.
    *
-   * ON by default. The system is specified as answering from a provided dataset,
-   * so the dataset is live from the first question; anything else hands an
-   * evaluator an empty app.
-   *
-   * Provenance — the reason an earlier revision defaulted this off — is handled
-   * by attribution instead: every answer names its source, and one drawn from
-   * the shipped corpus says so, so it can never be mistaken for the visitor's
-   * own document. A user's added sources are searched alongside it in the same
-   * fused ranking.
-   *
-   * Bench scripts set this explicitly regardless, so a change here cannot move a
+   * Provenance is handled by attribution instead: every answer names its source
+   * and a corpus passage says so, so it cannot be mistaken for the visitor's own
+   * document. Bench scripts set this explicitly, so a change here cannot move a
    * reported number.
    */
   private corpusEnabled = true;
@@ -251,10 +207,9 @@ export class RagEngine {
   /**
    * Is there anything at all to search?
    *
-   * With the corpus off and no sources added this is false, and the honest
-   * response to a question is to say so — not to run the pipeline and report
-   * LOW_CONFIDENCE, which claims we looked and found nothing good enough. We
-   * did not look. There was nowhere to look.
+   * False with the corpus off and no sources added. Distinguished from
+   * LOW_CONFIDENCE, which claims a search happened and found nothing good
+   * enough.
    */
   private searchable(): boolean {
     return this.corpusEnabled || !!this.store?.hasEnabled;
@@ -276,25 +231,18 @@ export class RagEngine {
   /**
    * Warm every code path with throwaway queries.
    *
-   * This exists specifically for P100. The first execution of any JS function
-   * runs in the interpreter before the JIT promotes it, and the first typed-array
-   * touch faults pages in. Measured here: the first query costs ~20ms of embed
-   * against ~6ms once warm, so an under-warmed engine sets P100 with its own
-   * first request rather than with anything about the corpus.
+   * For P100. The first execution of a JS function runs interpreted before the
+   * JIT promotes it, and the first typed-array touch faults pages in: an
+   * unwarmed first query costs ~20ms of embed against ~6ms warm.
    *
-   * Two scripts and a range of lengths, because tokenisation and the resulting
-   * sequence length are what the graph specialises on — warming only on a short
-   * ASCII string leaves the Devanagari path cold. The cost is ~150ms of a
-   * multi-second load, which is the cheapest tail reduction available anywhere
-   * in this system.
+   * Two scripts and a range of lengths, because the graph specialises on
+   * tokenisation and sequence length — warming only on short ASCII leaves the
+   * Devanagari path cold. Costs ~150ms of a multi-second load.
    */
   async warmup(samples: string[] = WARMUP_QUERIES): Promise<void> {
-    // Forced on for the duration regardless of the user's setting. Warm-up is
-    // about JIT and page faults, not about answers — and with the corpus off
-    // and no sources yet, every warm-up query would stop at gate 1 and leave
-    // retrieve, rescore and fuse stone cold. The first real question after the
-    // first source was added would then pay the whole interpreter-to-JIT cost
-    // and set P100 by itself.
+    // Forced on for the duration, whatever the user's setting. With the corpus
+    // off and no sources yet, every warm-up query would stop at gate 1 and
+    // leave retrieve, rescore and fuse cold.
     const restore = this.corpusEnabled;
     this.corpusEnabled = true;
     try {
@@ -342,8 +290,8 @@ export class RagEngine {
         run: (q) => {
           const g = gateInput(q);
           if (!g.pass) refusal = g;
-          // Checked after gateInput so an unsafe or injected query still gets
-          // its own specific handling rather than being told to add a source.
+          // After gateInput, so an unsafe or injected query gets its own message
+          // rather than being told to add a source.
           else if (!this.searchable()) {
             refusal = {
               pass: false,
@@ -353,9 +301,9 @@ export class RagEngine {
             };
           }
           // Clamped here rather than in `gateInput`, which answers yes/no and
-          // has no way to hand back a modified query. The clamped text is what
-          // every later stage sees, so the answer, the citations and the
-          // lexical overlap all describe the question that was actually asked.
+          // cannot hand back a modified query. Every later stage sees the
+          // clamped text, so answer, citations and overlap all describe the
+          // question that was actually searched.
           const clamped = clampQuery(q);
           if (clamped.length !== q.length) {
             truncatedFrom = q.length;
@@ -382,9 +330,9 @@ export class RagEngine {
         budgetMs: 80,
         run: (q, ctx) => {
           if (refusal) return q;
-          // The hard cap in practice. Embedding is the variable cost — on a slow
-          // phone it can take 10x what it takes here — so retrieval sizes itself
-          // against what is *left*, not against what it would like.
+          // Embedding is the variable cost — up to 10x on a slow phone — so
+          // retrieval sizes itself against what is left rather than against
+          // what it would prefer.
           plan = budgetPlan(ctx.remaining(), cfg, store?.activeChunks ?? 0);
 
           const hits: StrategyHits[] = [];
@@ -413,24 +361,20 @@ export class RagEngine {
       .add<string, string>({
         name: "rescore",
         budgetMs: 30,
-        // This stage is NOT the optional one it looks like. It converts the
-        // binary Hamming proxy into real cosine similarity, and gate 2's
-        // threshold was calibrated on that cosine. Skipping it does not just
-        // lose a little ranking quality — it leaves the gate comparing 0.4788
-        // against a number on a different scale entirely.
+        // Not optional despite the DEGRADE policy: this converts the binary
+        // Hamming proxy into real cosine, and gate 2's threshold is calibrated
+        // on that cosine. Skipping it leaves the gate comparing against a
+        // different scale entirely.
         //
-        // It also costs ~0.03ms for 16 passages. `bench/deadline.ts` caught an
-        // earlier version reserving 12ms for it, which under a tight budget
-        // skipped it and refused nearly everything. The reservation is now
-        // proportionate to what it actually costs; depth is controlled by
-        // `plan.rescoreTopN`, which is the knob that belongs to the deadline.
+        // The reservation is small because the work is: ~0.03ms for 16
+        // passages. Depth belongs to the deadline, via `plan.rescoreTopN`.
         minRemainingMs: 2,
         onError: "DEGRADE",
         fallback: (q) => q,
         run: (q) => {
           if (refusal || !fused.length) return q;
-          // Skipped with the corpus off: nothing in `fused` can be a corpus id,
-          // so preparing its rescorer would be work for a lookup never made.
+          // With the corpus off, nothing in `fused` can be a corpus id, so
+          // preparing its rescorer would be work for a lookup never made.
           if (this.corpusEnabled) idx.rescorer.prepare(qv);
           store?.prepareRescore(qv);
           const n = Math.min(plan.rescoreTopN, fused.length);
@@ -461,22 +405,17 @@ export class RagEngine {
           const top = fused[0];
           confidence = top.bestRawScore;
 
-          // If rescoring did not run, `bestRawScore` is `1 - hamming/dim`, not
-          // cosine, and there is no calibrated threshold for that scale. Rather
-          // than compare against a number fitted on a different quantity — which
-          // silently refuses almost everything — the score test is dropped and
-          // the structural signals (cross-strategy agreement, fusion margin,
-          // lexical overlap) carry the decision alone. That is a weaker gate,
-          // and it is reported as one rather than passed off as the calibrated
-          // path.
-          // The mid-band lexical rescue is a correction for a corpus mismatch,
-          // so it is applied only where the mismatch is. `minTopScore` was
-          // fitted on THIS corpus's own 3,012 labelled unanswerable queries;
-          // where the winning passage came from it, the calibration holds and
-          // there is nothing to correct. Measured: enabling the rescue on the
-          // corpus too raised coverage 88.5% -> 93.1% but cut abstention recall
-          // 0.245 -> 0.172 — buying 16 more correct answers with 11 more wrong
-          // ones, on the one split where we have labels saying so.
+          // Without rescoring, `bestRawScore` is `1 - hamming/dim` rather than
+          // cosine, and no threshold is calibrated for that scale. The score
+          // test is dropped rather than compared against a number fitted on a
+          // different quantity, leaving agreement, margin and lexical overlap
+          // to carry the decision. That is a weaker gate and is reported as one.
+          //
+          // The mid-band rescue corrects a corpus mismatch, so it is applied
+          // only where the mismatch is: `minTopScore` was fitted on the shipped
+          // corpus, so for corpus hits the calibration already holds. Enabling
+          // it there raised coverage 88.5% -> 93.1% but cut abstention recall
+          // 0.245 -> 0.172.
           const fromUserSource = top.passageId >= USER_BASE;
           const thresholds = rescored
             ? (fromUserSource
@@ -518,9 +457,8 @@ export class RagEngine {
 
     const run = await pipe.run<string>(query);
 
-    // A truncated question is a different question, so it is surfaced with the
-    // answer rather than left as a silent difference between what was asked and
-    // what was searched for.
+    // A truncated question is a different question, so the difference between
+    // what was asked and what was searched is surfaced with the answer.
     if (truncatedFrom) {
       plan = {
         ...plan,
@@ -530,8 +468,8 @@ export class RagEngine {
       };
     }
 
-    // Captured before the branch below, so a refusal reports what retrieval
-    // actually ranked rather than losing it along with the citations.
+    // Captured before the branch below, so a refusal still reports what
+    // retrieval ranked instead of losing it with the citations.
     const retrieved = fused.slice(0, 10).map((f) => f.passageId);
 
     let out: RagAnswer;
@@ -575,22 +513,19 @@ export class RagEngine {
       };
     }
 
-    // Bounded cache: a demo session asking the same question repeatedly should
-    // not grow memory without limit.
+    // Bounded so a long session cannot grow memory without limit.
     if (this.cache.size > 256) this.cache.clear();
     this.cache.set(key, out);
     return out;
   }
 
-  /**
-   * Adding or removing a source changes what the right answer is, so every
-   * cached answer from before the change is now potentially wrong.
-   */
+  /** Adding or removing a source changes what the right answer is, so every
+   *  answer cached before the change is potentially wrong. */
   invalidate(): void { this.cache.clear(); }
 
   /**
-   * Verify an LLM-synthesised answer before it is allowed to replace the
-   * extractive one. Runs off the fast path.
+   * Verify an LLM-synthesised answer before it replaces the extractive one.
+   * Runs off the fast path.
    */
   verifySynthesis(answer: string, citations: Citation[]): GateResult {
     return gateGrounding(answer, citations.map((c) => c.text));

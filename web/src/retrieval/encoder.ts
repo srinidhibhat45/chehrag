@@ -1,6 +1,6 @@
 /**
- * Query encoder — transformers.js over the SAME ONNX weights the index was
- * built with (Xenova/multilingual-e5-small, int8).
+ * Query encoder — transformers.js over the same ONNX weights the index was built
+ * with (Xenova/multilingual-e5-small, int8).
  *
  * Two implementations behind one interface:
  *
@@ -9,14 +9,14 @@
  *   WorkerEncoder  off-thread (encoder.worker.ts). What the app uses.
  *
  * Both run the identical graph with identical prefixes, so the benchmark
- * exercises the deployed code path rather than an approximation of it.
+ * exercises the deployed code path.
  *
- * Two details are load-bearing and easy to get wrong:
+ * Two details are easy to get wrong:
  *   - dtype 'q8' must match the build. The Python builder used
- *     model_quantized.onnx; drift was measured at cos=0.996 with 100% top-10
- *     rank agreement, but only for THAT pairing.
- *   - e5 requires the "query: " / "passage: " prefixes. Omitting them silently
- *     costs recall because the model was contrastively trained with them.
+ *     model_quantized.onnx; drift against fp32 measured cos=0.996 with 100%
+ *     top-10 rank agreement, but only for that pairing.
+ *   - e5 requires the "query: " / "passage: " prefixes. It was contrastively
+ *     trained with them, and omitting them costs recall silently.
  */
 
 import type { Encoder } from "../harness/rag";
@@ -26,13 +26,20 @@ const MODEL_ID = "Xenova/multilingual-e5-small";
 
 /**
  * transformers.js types the pipeline factory as a union over every task, which
- * TypeScript cannot represent at this call site (TS2590). We only ever use the
- * feature-extraction shape, so it is narrowed to exactly that.
+ * TypeScript cannot represent at this call site (TS2590). Narrowed to the
+ * feature-extraction shape, which is the only one used here.
  */
 type ExtractFn = (
   text: string | string[],
   opts: { pooling: "mean"; normalize: boolean },
 ) => Promise<{ data: Float32Array | ArrayLike<number>; dims: number[] }>;
+
+/**
+ * Cumulative bytes of the model download. Called only while the encoder is first
+ * loading and only for files actually coming over the network — a warm cache
+ * reports nothing, which the caller must read as "unknown", not "0%".
+ */
+export type EncoderProgress = (loaded: number, total: number) => void;
 
 /** What ingestion needs on top of the query interface. */
 export interface BatchEncoder extends Encoder {
@@ -50,19 +57,22 @@ export interface BatchEncoder extends Encoder {
 export class E5Encoder implements BatchEncoder {
   private extractor: ExtractFn | null = null;
 
-  async init(): Promise<void> {
+  async init(onProgress?: EncoderProgress): Promise<void> {
     if (this.extractor) return;
-    // Imported dynamically, and this is a bundle decision rather than a style
-    // one. A static import would pull all ~870 kB of transformers.js into the
-    // main chunk purely to have a fallback ready — on top of the copy already
-    // in the worker chunk, which is the path that actually runs. Deferring it
-    // means the browser parses the library once, on the thread that uses it.
+    // Dynamic for bundle reasons: a static import pulls ~870 kB of
+    // transformers.js into the main chunk to have a fallback ready, on top of
+    // the copy already in the worker chunk that actually runs.
     const { pipeline } = await import("@huggingface/transformers");
     this.extractor = (await pipeline(
-      "feature-extraction", MODEL_ID, { dtype: "q8" },
+      "feature-extraction", MODEL_ID, {
+        dtype: "q8",
+        progress_callback: onProgress
+          ? (i) => { if (i.status === "progress") onProgress(i.loaded, i.total); }
+          : undefined,
+      },
     )) as unknown as ExtractFn;
-    // Warm the graph: the first inference allocates buffers and triggers JIT.
-    // Doing it here keeps that cost out of the first measured query.
+    // The first inference allocates buffers and triggers JIT; paying it here
+    // keeps it out of the first measured query.
     await this.encodeQuery("warmup");
   }
 
@@ -97,9 +107,9 @@ interface Pending {
 }
 
 /**
- * `Omit` collapses a union into one object type, which would let `{op:"query"}`
- * be sent with a `texts` field. Distributing over the members keeps each
- * variant's own shape intact.
+ * `Omit` collapses a union into one object type, which would allow `{op:"query"}`
+ * to carry a `texts` field. Distributing over the members keeps each variant's
+ * own shape intact.
  */
 type Message = Req extends infer T
   ? T extends { id: number } ? Omit<T, "id"> : never
@@ -108,12 +118,11 @@ type Message = Req extends infer T
 /**
  * Worker-backed encoder with query priority.
  *
- * The worker handles messages serially, so priority has to be enforced on this
- * side: bulk (ingestion) batches are held in a queue here and dispatched one at
- * a time, and dispatch stops while a query is in flight. A query therefore waits
- * for at most one already-running batch — which is why `BULK_BATCH` is small.
- * At 8 passages a batch costs ~25ms, so the worst case a query can inherit from
- * ingestion is ~25ms of a 200ms budget, and only if it arrives mid-batch.
+ * The worker handles messages serially, so priority is enforced on this side:
+ * ingestion batches queue here and dispatch one at a time, and dispatch stops
+ * while a query is in flight. A query therefore waits for at most one running
+ * batch, which is why `BULK_BATCH` is small — at 8 passages a batch costs ~25ms,
+ * bounding what a query can inherit from ingestion.
  */
 const BULK_BATCH = 8;
 
@@ -134,13 +143,19 @@ export class WorkerEncoder implements BatchEncoder {
   /** Set when construction or init fails; the caller falls back in-thread. */
   private failed = false;
 
-  async init(): Promise<void> {
+  async init(onProgress?: EncoderProgress): Promise<void> {
     if (this.worker) return;
     this.worker = new Worker(new URL("./encoder.worker.ts", import.meta.url), {
       type: "module",
       name: "chehrag-encoder",
     });
     this.worker.onmessage = (e: MessageEvent<Res>) => {
+      // Routed on `op` first: progress answers no request, so a `pending`
+      // lookup would drop it silently.
+      if (e.data.ok && e.data.op === "progress") {
+        onProgress?.(e.data.loaded, e.data.total);
+        return;
+      }
       const p = this.pending.get(e.data.id);
       if (!p) return;
       this.pending.delete(e.data.id);
@@ -181,8 +196,7 @@ export class WorkerEncoder implements BatchEncoder {
 
   encodePassages(texts: string[]): Promise<Float32Array[]> {
     if (!texts.length) return Promise.resolve([]);
-    // Split into small batches up front so the queue is already at the
-    // granularity dispatch needs.
+    // Split up front so the queue is already at the granularity dispatch needs.
     const batches: Promise<Float32Array[]>[] = [];
     for (let i = 0; i < texts.length; i += BULK_BATCH) {
       const slice = texts.slice(i, i + BULK_BATCH);
@@ -224,15 +238,15 @@ export class WorkerEncoder implements BatchEncoder {
 /**
  * Build the best encoder this environment supports.
  *
- * Worker construction can fail for reasons we do not control — a restrictive
- * CSP, an old browser, a privacy extension. Voice and search matter more than
- * threading, so we fall back rather than fail.
+ * Worker construction can fail for external reasons — a restrictive CSP, an old
+ * browser, a privacy extension — so this falls back in-thread rather than
+ * failing outright.
  */
-export async function createEncoder(): Promise<BatchEncoder> {
+export async function createEncoder(onProgress?: EncoderProgress): Promise<BatchEncoder> {
   if (typeof Worker !== "undefined") {
     const w = new WorkerEncoder();
     try {
-      await w.init();
+      await w.init(onProgress);
       if (w.usable) return w;
     } catch (err) {
       console.warn("encoder worker unavailable, running in-thread", err);
@@ -240,6 +254,6 @@ export async function createEncoder(): Promise<BatchEncoder> {
     }
   }
   const e = new E5Encoder();
-  await e.init();
+  await e.init(onProgress);
   return e;
 }

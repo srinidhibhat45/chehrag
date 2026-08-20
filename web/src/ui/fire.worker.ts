@@ -1,14 +1,12 @@
 /**
  * Renders the fireball, off the main thread.
  *
- * This worker exists for one reason and it is not throughput: every frame the
- * fire draws is a frame the thread running queries does not have to spend. The
- * whole project's claim is a 200 ms ceiling measured on the main thread, so an
- * idle animation sharing that thread would be putting its own frames inside the
- * number it exists to advertise.
+ * Not for throughput: every frame the fire draws is a frame the thread running
+ * queries does not spend. The 200 ms ceiling is measured on the main thread, so
+ * an idle animation sharing it would land inside the number it advertises.
  *
- * `requestAnimationFrame` is available in a dedicated worker whenever
- * `OffscreenCanvas` is, so the loop is still vsync-locked — this is not a
+ * `requestAnimationFrame` is available in a dedicated worker wherever
+ * `OffscreenCanvas` is, so the loop stays vsync-locked rather than being a
  * `setTimeout` approximation of one.
  */
 
@@ -40,13 +38,12 @@ self.onmessage = (e: MessageEvent<FireMessage>) => {
       case "state":      fire?.set(m.input); break;
       case "light":      fire?.setLight(m.on); break;
       // A hidden tab still gets rAF in some configurations, and a fireball
-      // nobody is looking at is pure battery. Stop outright.
+      // nobody is looking at is pure battery.
       case "visibility": m.visible ? fire?.start() : fire?.stop(); break;
-      // Held for the duration of a measured query. Being off the main thread
-      // means the fire cannot steal time from the pipeline directly, but it
-      // still competes for a core and for the GPU, and on a two-core machine
-      // that lands inside the 200 ms this project is graded on. Kept separate
-      // from `visibility` so the two cannot cancel each other out.
+      // Held for the duration of a measured query. Off the main thread the
+      // fire cannot take time from the pipeline directly, but it still competes
+      // for a core and the GPU, which on a two-core machine lands inside the
+      // budget. Kept separate from `visibility` so the two cannot cancel out.
       case "freeze":     m.on ? fire?.stop() : fire?.start(); break;
     }
   } catch (err) {

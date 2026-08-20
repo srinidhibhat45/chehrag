@@ -1,31 +1,28 @@
 /**
  * The embedding model, on its own thread.
  *
- * Why a worker at all. Embedding is the single most expensive thing in the
- * query path (~7ms of a ~10ms query) and it is also what ingestion spends
- * minutes doing. On one thread those two compete: add a PDF, ask a question
- * while it indexes, and the question queues behind hundreds of ingestion
- * batches. That is a latency failure the per-stage budgets cannot rescue,
- * because the time is spent before the stage even starts.
+ * Embedding is the most expensive thing in the query path (~7ms of a ~10ms
+ * query) and also what ingestion spends minutes doing. On one thread the two
+ * compete: ask a question while a PDF indexes and it queues behind hundreds of
+ * ingestion batches, which the per-stage budgets cannot rescue because the time
+ * is spent before the stage starts.
  *
  * Moving inference here costs ~0.3ms of postMessage per query and buys three
- * things: ingestion never blocks a query, the main thread never janks (so the
- * lamp animates at 60fps while a document indexes), and ONNX's allocations stop
- * landing in the same GC arena as the UI — which is where P100 jitter comes
- * from.
+ * things: ingestion never blocks a query, the main thread never janks, and
+ * ONNX's allocations stop landing in the same GC arena as the UI — which is
+ * where P100 jitter comes from.
  *
- * Scheduling lives on the main thread (see encoder.ts): it holds the ingestion
- * queue and dispatches one small batch at a time, so a query never waits behind
- * more than a single in-flight batch.
+ * Scheduling lives on the main thread (see `encoder.ts`), which holds the
+ * ingestion queue and dispatches one small batch at a time.
  */
 
 import { pipeline, env } from "@huggingface/transformers";
 
 const MODEL_ID = "Xenova/multilingual-e5-small";
 
-// Match the index build exactly. `model_quantized.onnx` (q8) is what
-// pipeline/src/embedder.py used; drift against fp32 was measured at cos=0.996
-// with 100% top-10 rank agreement, but only for that pairing.
+// Must match the index build. `pipeline/src/embedder.py` used
+// `model_quantized.onnx` (q8); drift against fp32 measured cos=0.996 with 100%
+// top-10 rank agreement, but only for that pairing.
 const DTYPE = "q8";
 
 type ExtractFn = (
@@ -43,22 +40,56 @@ export type Req =
 
 export type Res =
   | { id: number; ok: true; op: "init"; dim: number }
+  /**
+   * Unsolicited: model download progress, sent while `init` is still pending.
+   * `id` is 0 because it answers no request, and the main thread routes on `op`
+   * before looking a request up.
+   */
+  | { id: 0; ok: true; op: "progress"; loaded: number; total: number }
   | { id: number; ok: true; op: "query"; vec: Float32Array }
   | { id: number; ok: true; op: "passages"; vecs: Float32Array; n: number; dim: number }
   | { id: number; ok: false; error: string };
 
+/**
+ * Cumulative download progress across the model's files.
+ *
+ * transformers.js reports per file — config, tokenizer, ONNX weights — so the
+ * per-file numbers are held and totalled rather than forwarded one at a time.
+ *
+ * Files already in the browser cache emit no `progress` at all, which is why
+ * `total` can stay 0 through a warm boot. Nothing is sent in that case, and the
+ * curtain leaves its row alone rather than showing 0%.
+ */
+const files = new Map<string, { loaded: number; total: number }>();
+let lastPost = 0;
+
+function onModelProgress(info: { status: string; file?: string; loaded?: number; total?: number }): void {
+  if (info.status !== "progress" || !info.file) return;
+  files.set(info.file, { loaded: info.loaded ?? 0, total: info.total ?? 0 });
+
+  // Throttled: this fires per chunk per file, and one postMessage per chunk
+  // would put the download's own bookkeeping on the main thread's queue.
+  const now = performance.now();
+  if (now - lastPost < 100) return;
+  lastPost = now;
+
+  let loaded = 0, total = 0;
+  for (const f of files.values()) { loaded += f.loaded; total += f.total; }
+  if (total > 0) reply({ id: 0, ok: true, op: "progress", loaded, total });
+}
+
 async function init(): Promise<number> {
   if (extractor) return dim;
-  // Model weights are fetched from the HF CDN once and served from the browser
-  // cache after. Nothing here is on the query path.
+  // Weights come from the HF CDN once, then from the browser cache. Nothing
+  // here is on the query path.
   env.allowLocalModels = false;
   extractor = (await pipeline("feature-extraction", MODEL_ID, {
     dtype: DTYPE,
+    progress_callback: onModelProgress,
   })) as unknown as ExtractFn;
 
-  // Warm the graph here, not on the first real query. The first inference
-  // allocates every buffer and triggers JIT; un-warmed it is 5-20x slower and
-  // would single-handedly set P100.
+  // Warm the graph here rather than on the first real query. The first inference
+  // allocates every buffer and triggers JIT, running 5-20x slower.
   const out = await extractor("query: warmup", { pooling: "mean", normalize: true });
   dim = out.dims[out.dims.length - 1] ?? 384;
   return dim;
@@ -75,15 +106,15 @@ self.onmessage = async (e: MessageEvent<Req>) => {
     if (!extractor) await init();
 
     if (msg.op === "query") {
-      // e5 requires the "query: " prefix — it was contrastively trained with it,
-      // and omitting it costs recall silently.
+      // e5 was contrastively trained with the "query: " prefix; omitting it
+      // costs recall silently.
       const out = await extractor!(`query: ${msg.text}`, { pooling: "mean", normalize: true });
       const vec = toF32(out.data);
       reply({ id: msg.id, ok: true, op: "query", vec }, [vec.buffer]);
       return;
     }
 
-    // passages — the ingestion path. Batched by the caller.
+    // The ingestion path. Batched by the caller.
     const texts = msg.texts.map((t) => `passage: ${t}`);
     const out = await extractor!(texts, { pooling: "mean", normalize: true });
     const vecs = toF32(out.data);

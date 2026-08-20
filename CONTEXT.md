@@ -113,7 +113,7 @@ Everything in the fast path must be warmed at load and allocation-free per query
 - [x] Layout — three panes (sources / conversation / studio); latency is a chip per answer
 - [x] TTS — ElevenLabs `eleven_flash_v2_5` + Sarvam `bulbul:v2`, routed by language
 - [x] Multilingual stress test — 15 languages x 200 queries; found 5 bugs
-- [ ] **Deploy — BLOCKED on user: `wrangler login` (browser OAuth) + Sarvam / ElevenLabs API keys**
+- [x] **Deployed — https://chehrag.pages.dev** (Worker: `chehrag-worker.chehrag-worker.workers.dev`)
 
 ## Measured facts (don't re-derive)
 
@@ -546,3 +546,103 @@ paint to wait for, which makes falling through correct rather than a compromise.
 - Cross-origin isolation confirmed live in `vite preview`
   (`crossOriginIsolated === true`, SAB present) — so the browser/Node gap is
   WASM overhead, not a silently single-threaded ORT.
+
+---
+
+## Fourth pass — the first-run curtain (2026-08-20)
+
+### The first visit was 35 seconds of a dead interface
+
+Measured on a genuinely cold cache (IndexedDB and cache storage cleared,
+production build): **34.9 s to ready.** For all of it the visitor saw a lamp
+with `disabled` on it, a "Type instead" button that opened a text field which
+refused keystrokes, and an "Add" button wired to nothing — `SourcesPanel` is
+not constructed until the encoder and the store exist. The only account of any
+of it was eleven pixels of grey byte counter under the lamp.
+
+A disabled control with no stated reason is indistinguishable from a broken
+one, and there were three at once.
+
+`src/ui/curtain.ts` + markup in `index.html`. Modal because the block is real:
+it names the three things `boot()` actually awaits, in the shape it awaits them
+(index and model in parallel, then warm-up), and lifts *after* the inputs are
+enabled rather than before.
+
+`.app` carries `inert` from the initial HTML rather than from JS, so there is
+no frame in which the dead controls are focusable. Where `inert` is
+unsupported the curtain still covers and pointer-blocks; only tabbing behind it
+survives, which is the right thing to lose first.
+
+### The model was a 135 MB download that reported nothing
+
+Found by watching the first version: the bar froze at 88% for the entire
+encoder load, because only the index had progress and the model — the other
+half of the parallel pair — had none. That reproduced the exact confusion the
+curtain exists to remove, one step further in.
+
+transformers.js takes a `progress_callback`; it was simply never passed. Now
+plumbed out of `encoder.worker.ts` as an unsolicited `op: "progress"` message
+(`id: 0`, routed on `op` before the pending-request lookup, or it is dropped
+silently), summed across the model's files, throttled to 10/s.
+
+Consequences worth keeping:
+
+- **The bar is split 0.44 / 0.44 / 0.12** across index, model and warm-up, not
+  weighted by bytes. Byte weighting makes the bar's rate a property of the
+  cache state rather than of the boot, and a bar only one of two parallel
+  downloads can move freezes whenever the other is the slow half.
+- **A phase that completes without ever reporting a byte jumps to 1.** A warm
+  cache fetches nothing and so reports nothing; absence of progress is not
+  zero progress.
+- **Bytes finishing is not the phase finishing.** ONNX still builds the session
+  and runs a warm-up inference after the last byte, so the row switches from
+  `135 of ~135 MB` to `preparing` rather than sitting on a completed-looking
+  count that has not ticked.
+
+### Two failure paths, because they fail differently
+
+- `boot()` rejecting is reported *on the curtain*, not only on the orb — the
+  orb is behind it, and an error the user cannot see is the same as no error.
+- The module never running at all (chunk 404, CSP, parse error) cannot be
+  reported by `curtain.ts`, which is the thing that did not load. A classic
+  inline `<script>` in `index.html` handles that one, keyed on a `data-wired`
+  flag the Curtain constructor sets — not on a timer against the download,
+  because a cold first visit is legitimately long and must not trip it.
+
+Plus a stall detector: 30 s with no byte and no phase change says the wait has
+become abnormal and offers Reload. It does not claim failure — the fetch may
+still be alive.
+
+Cost: +3.0 kB JS, +3.1 kB CSS, +4.2 kB HTML.
+
+### Live on Cloudflare (2026-08-20)
+
+`./scripts/deploy.sh` → verified by `scripts/verify-deploy.sh`: COOP + COEP
+present, index and largest blob served, passage text brotli'd, Worker healthy,
+and a real cross-lingual generation over the wire.
+
+**Measured on the live origin, not locally:**
+
+| | p50 | p70 | p95 | P100 | over 200 ms |
+|---|---|---|---|---|---|
+| localhost | 9.42 | — | — | 21.58 | 0 / 500 |
+| chehrag.pages.dev | 9.39 | 10.05 | 12.38 | 25.77 | 0 / 500 |
+
+`crossOriginIsolated === true` live, so the threaded WASM path is real and the
+numbers above are not single-threaded ones.
+
+Cold first visit on the live origin: **32.4 s** — index and the 135 MB model in
+parallel, both now reported by the curtain.
+
+**Benchmark methodology note, same family as BUG 10.** The first two live runs
+read p50 50 / P100 137 and looked like the deployment was 5x slower than local.
+It was not: both were taken immediately after the tab was activated, and the
+activation's repaint and worker resume landed inside the measured span —
+`totalMs` is wall-clock across an `await` on the encoder worker and cannot tell
+them apart. A control run on localhost under identical conditions is what
+separated "the deployment is slow" from "the measurement is". **Never read a
+percentile from a tab that just changed visibility state.**
+
+ElevenLabs remains unconfigured (`/health` → `elevenlabs: false`); Sarvam covers
+TTS for every language in the corpus, so this is a missing alternative rather
+than a missing capability.

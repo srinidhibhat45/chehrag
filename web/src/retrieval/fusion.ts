@@ -1,24 +1,22 @@
 /**
  * Reciprocal Rank Fusion across the six chunking strategies.
  *
- * Why RRF rather than blending scores: the six indices are not score-comparable.
- * A `sentence` chunk is ~111 chars and a `document` chunk is ~925, and cosine
- * similarity against a short query behaves differently at each length -- short
- * chunks score systematically higher. Averaging those scores would silently hand
- * the sentence index a permanent advantage.
+ * RRF rather than a score blend because the six indices are not score
+ * comparable: a `sentence` chunk averages ~111 chars against a `document`
+ * chunk's ~925, and cosine against a short query runs systematically higher on
+ * short chunks. Averaging would hand the sentence index a permanent advantage.
  *
- * RRF throws the magnitudes away and keeps only *rank*, which is comparable
- * across indices by construction. It needs no per-index normalisation and no
- * tuning beyond k.
+ * Rank is comparable across indices by construction, so RRF needs no per-index
+ * normalisation and no tuning beyond k:
  *
  *   score(passage) = SUM over strategies of  weight / (k + rank)
  *
- * k=60 is the value from the original Cormack et al. formulation; it damps the
- * head so a single index cannot dominate on its own.
+ * k=60 is the value from Cormack et al.; it damps the head so no single index
+ * dominates.
  *
- * Chunks are fused at *passage* level, not chunk level: several chunks from one
- * passage should reinforce that passage, not crowd the result list with near
- * duplicates of itself. Best rank per (passage, strategy) wins.
+ * Fusion is at passage level, not chunk level: several chunks of one passage
+ * should reinforce it rather than crowd the result list with near-duplicates.
+ * Best rank per (passage, strategy) wins.
  */
 
 import { contentTokens } from "./tokens";
@@ -43,19 +41,18 @@ export interface FusedHit {
 }
 
 /**
- * Per-strategy weights.
- *
- * These encode what each strategy is *for*, from the design rationale in
+ * Per-strategy weights, encoding what each strategy is for — see
  * `pipeline/src/chunking/strategies.py`:
- *   whole/contextual — precise, self-contained; trusted most
- *   sentence         — precise but context-poor
- *   semantic         — low yield on this corpus (passages are ~3 sentences)
- *   sliding          — noisy alone, valuable as a tie-breaker
- *   document         — recall instrument, dilute vectors; never precision
  *
- * Deliberately hand-set and modest in spread. Fitting six weights on the same
- * split we report metrics on would overfit; RRF is robust to weight choice, and
- * the eval measures leave-one-out contribution instead.
+ *   whole/contextual  precise, self-contained; trusted most
+ *   sentence          precise but context-poor
+ *   semantic          low yield on this corpus (passages are ~3 sentences)
+ *   sliding           noisy alone, valuable as a tie-breaker
+ *   document          recall instrument, dilute vectors; never precision
+ *
+ * Hand-set and modest in spread. Fitting six weights on the same split the
+ * metrics are reported on would overfit; RRF is robust to weight choice, and the
+ * eval measures leave-one-out contribution instead.
  */
 export const DEFAULT_WEIGHTS: Record<string, number> = {
   whole: 1.0,
@@ -113,9 +110,9 @@ export function fuse(
 /**
  * Margin between the top hit and the runner-up, normalised by the top score.
  *
- * A flat distribution means retrieval found many equally-mediocre things, which
- * is the signature of a query the corpus cannot answer. Guardrail gate 2 reads
- * this alongside the absolute score.
+ * A flat distribution means retrieval found many equally mediocre things, the
+ * signature of a query the corpus cannot answer. Gate 2 reads this alongside
+ * the absolute score.
  */
 export function fusionMargin(fused: FusedHit[]): number {
   if (fused.length < 2) return 1;
@@ -127,10 +124,9 @@ export function fusionMargin(fused: FusedHit[]): number {
 /**
  * Query-vs-passage token overlap. Cheap lexical sanity check for gate 2.
  *
- * Measured over *content* words only. Counting function words made the score a
- * measure of how tersely the question was phrased rather than of what it was
- * about: "srinidhi" scored 1.0 against a passage that "what is the name" scored
- * 0.25 against, and the threshold sits between them. See `tokens.ts`.
+ * Content words only. Including function words would make this a measure of how
+ * tersely the question was phrased rather than of what it was about. See
+ * `tokens.ts`.
  */
 export function lexicalOverlap(query: string, passage: string): number {
   const q = contentTokens(query);

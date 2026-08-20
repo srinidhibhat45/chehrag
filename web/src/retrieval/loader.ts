@@ -1,14 +1,12 @@
 /**
- * Index loading + IndexedDB caching.
+ * Index loading and IndexedDB caching.
  *
- * The index is ~40 MB of binary blobs. Downloading that on every visit would be
- * rude; re-parsing it on every visit would be slow. So blobs are cached as raw
- * ArrayBuffers in IndexedDB, keyed by the manifest's build timestamp, and typed
- * arrays are created as *views* over those buffers — no copy, no parse.
+ * The index is ~40 MB of binary blobs, so they are cached as raw ArrayBuffers in
+ * IndexedDB keyed by the manifest's build timestamp, and typed arrays are
+ * created as views over those buffers — no copy, no parse.
  *
- * None of this is in the 200ms path. Load happens once at startup; the budget is
- * measured per query against a warm index. That distinction is stated explicitly
- * in the latency report rather than glossed over.
+ * None of this is on the 200ms path: load happens once at startup and the budget
+ * is measured per query against a warm index.
  */
 
 import { IvfIndex, type IvfIndexData, PassageRescorer } from "./ivf";
@@ -58,12 +56,10 @@ async function idbPut(db: IDBDatabase, key: string, val: ArrayBuffer): Promise<v
 export type ProgressFn = (loaded: number, total: number, label: string) => void;
 
 /**
- * Exact byte size of the binary blobs, derived from the manifest.
- *
- * Worth computing rather than guessing, because this is what the loading lamp
- * fills against. Every array's length is fully determined by counts already in
- * the manifest, so the only estimate in the whole figure is the passage text —
- * and that is called out as an estimate rather than folded in silently.
+ * Byte size of the binary blobs, derived from the manifest. This is what the
+ * loading progress fills against. Every array's length follows from counts the
+ * manifest already carries; only the passage text is an estimate, and it is
+ * returned separately for that reason.
  */
 export function expectedBytes(manifest: Manifest): { blobs: number; text: number } {
   const { dim, codeWords, numPassages } = manifest;
@@ -99,10 +95,10 @@ async function fetchCached(
       if (hit) { onProgress?.(hit.byteLength, hit.byteLength, `${path} (cached)`); return hit; }
     } catch { /* cache miss is not an error */ }
   }
-  // `?v=<builtAt>` is what makes `Cache-Control: immutable` safe on these files.
-  // Their paths are not content-hashed, so without the query a rebuilt index
-  // would keep serving year-old bytes from the HTTP cache against a new
-  // manifest — vectors and text silently out of step, no error anywhere.
+  // `?v=<builtAt>` is what makes `Cache-Control: immutable` safe here. These
+  // paths are not content-hashed, so without it a rebuilt index would keep
+  // serving stale bytes against a new manifest — vectors and text out of step,
+  // with no error anywhere.
   const res = await fetch(`${base}/${path}?v=${encodeURIComponent(version)}`);
   if (!res.ok) throw new Error(`failed to fetch ${path}: ${res.status}`);
   const buf = await res.arrayBuffer();
@@ -125,10 +121,9 @@ export interface LoadedIndex {
 /**
  * Assemble an index from already-fetched buffers.
  *
- * Transport-agnostic on purpose: the browser reaches these bytes over HTTP with
- * an IndexedDB cache in front, and the benchmark reads them from disk. Both then
- * run THIS function, so the benchmark exercises the deployed code path rather
- * than a re-implementation of it that could quietly diverge.
+ * Transport-agnostic: the browser reaches these bytes over HTTP with IndexedDB
+ * in front, the benchmark reads them from disk, and both then run this function.
+ * A second implementation for the benchmark would be free to diverge.
  */
 export function assembleIndex(
   manifest: Manifest,
@@ -161,8 +156,8 @@ export function assembleIndex(
     indices.set(name, new IvfIndex(data, manifest.numPassages));
   }
 
-  // Must mirror pipeline/src/build_index.py::project exactly — centre, project,
-  // re-L2-normalise. A mismatch is silent: retrieval just gets quietly worse.
+  // Mirrors `build_index.py::project` exactly: centre, project, re-L2-normalise.
+  // A mismatch is silent — retrieval just gets worse.
   const projectQuery = (raw: Float32Array, out: Float32Array): void => {
     let norm = 0;
     for (let i = 0; i < dim; i++) {
@@ -192,7 +187,7 @@ export function indexBlobNames(manifest: Manifest): string[] {
 
 export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<LoadedIndex> {
   // The one file that must always be fresh: it carries the version every other
-  // URL is busted with, so a stale manifest pins a stale index forever.
+  // URL is cache-busted with, so a stale manifest pins a stale index forever.
   const manifest: Manifest = await (await fetch(`${base}/manifest.json`, {
     cache: "no-cache",
   })).json();
@@ -204,8 +199,8 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
   const names = indexBlobNames(manifest);
   const shards = manifest.passageShards ?? ["passages.json"];
 
-  // Cumulative progress against the real expected total, so the lamp fills at a
-  // rate that means something instead of jumping per file.
+  // Cumulative against the expected total, so progress advances at a meaningful
+  // rate rather than jumping per file.
   const expect = expectedBytes(manifest);
   const total = expect.blobs + expect.text;
   let loaded = 0;
@@ -217,14 +212,13 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
   const [buffers, shardArrays] = await Promise.all([
     Promise.all(names.map((n) =>
       fetchCached(db, base, n, v, (b, _t, label) => step(b, label)))),
-    // Shards are fetched in parallel and concatenated in order. Ordinals are
-    // assigned by position, so order is load-bearing — do not sort or race.
+    // Fetched in parallel, concatenated in order. Ordinals are assigned by
+    // position, so the order is load-bearing — do not sort or race.
     //
-    // `r.json()` rather than `r.text()` + `JSON.parse`: the text form would hold
-    // a 74 MB string alongside the parsed array at peak, and on a 4 GB phone
-    // that headroom is not free. The cost is that the exact transferred size is
-    // no longer observable, so progress is charged per shard against the
-    // estimate — which is what a progress bar needs anyway.
+    // `r.json()` rather than `r.text()` + `JSON.parse`: the text form holds a
+    // 74 MB string alongside the parsed array at peak. The cost is that the
+    // transferred size is no longer observable, so progress is charged per shard
+    // against the estimate.
     Promise.all(shards.map(async (s) => {
       const r = await fetch(`${base}/${s}?v=${encodeURIComponent(v)}`);
       if (!r.ok) throw new Error(`failed to fetch ${s}: ${r.status}`);

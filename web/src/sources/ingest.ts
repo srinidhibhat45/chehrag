@@ -1,15 +1,15 @@
 /**
- * Turning whatever the user hands us into plain text.
+ * Turning whatever the user adds into plain text.
  *
- * Everything a user can add — pasted text, a dropped file, a URL — reduces to
- * the same thing: a title and a body of text. Retrieval never sees the original
- * format, so all format knowledge is confined to this file.
+ * Pasted text, a dropped file and a URL all reduce to a title and a body.
+ * Retrieval never sees the original format, so format knowledge is confined to
+ * this file.
  *
- * Heavy extractors are dynamically imported. A user who only ever pastes text
- * should not pay for the PDF parser, which is larger than the rest of the app.
+ * Heavy extractors are dynamically imported: someone who only pastes text should
+ * not pay for the PDF parser, which is larger than the rest of the app.
  *
- * None of this is on the 200ms path. Ingestion happens once, when a source is
- * added; queries only ever touch the vectors it produced.
+ * None of this is on the 200ms path. Ingestion happens once per source; queries
+ * only touch the vectors it produced.
  */
 
 export type SourceKind = "paste" | "file" | "url";
@@ -17,7 +17,7 @@ export type SourceKind = "paste" | "file" | "url";
 export interface Extracted {
   title: string;
   text: string;
-  /** Shown in the sources panel so the user can see what we actually parsed. */
+  /** Shown in the sources panel, so the user can see what was actually parsed. */
   note?: string;
 }
 
@@ -34,11 +34,10 @@ export const MAX_CHARS = 600_000;
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 /**
- * Collapse the whitespace damage that every extractor produces in its own way.
- *
- * PDFs emit line breaks mid-sentence, HTML emits runs of non-breaking spaces,
- * DOCX emits none at all. Sentence splitting downstream assumes normal spacing,
- * so normalising here keeps the chunker from having to know where text came from.
+ * Collapse the whitespace damage each extractor produces in its own way: PDFs
+ * emit line breaks mid-sentence, HTML emits runs of non-breaking spaces, DOCX
+ * emits none at all. Sentence splitting downstream assumes normal spacing, so
+ * normalising here keeps the chunker from having to know where text came from.
  */
 function normalise(raw: string): string {
   return raw
@@ -114,7 +113,7 @@ export async function ingestFile(file: File): Promise<Extracted> {
     text = await file.text();
   } else {
     // Unknown extension: try it as text rather than refusing outright, but
-    // reject binary — a decoded binary is noise that would poison retrieval.
+    // reject binary — decoded binary is noise that would poison retrieval.
     const guess = await file.text();
     if (looksBinary(guess)) {
       throw new IngestError(`Can't read ${name}.`,
@@ -148,14 +147,14 @@ function looksBinary(s: string): boolean {
 }
 
 /**
- * PDF text extraction via pdf.js, imported only when a PDF actually arrives.
+ * PDF text extraction via pdf.js, imported only when a PDF arrives.
  *
- * Scanned PDFs have no text layer at all. We detect that and say so, because
+ * Scanned PDFs have no text layer at all. That is detected and reported, since
  * silently indexing an empty document is worse than refusing it.
  */
 async function extractPdf(file: File): Promise<{ text: string; note?: string }> {
   const pdfjs = await import("pdfjs-dist");
-  // Bundled through Vite (`?url`) rather than fetched from a CDN — the app must
+  // Bundled through Vite (`?url`) rather than fetched from a CDN: the app must
   // work offline once loaded, and a CDN is another origin to trust.
   const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -175,8 +174,8 @@ async function extractPdf(file: File): Promise<{ text: string; note?: string }> 
     for (const item of content.items) {
       if (!("str" in item)) continue;
       line += item.str;
-      // pdf.js marks the end of a visual line; without this every page is one
-      // giant run-on string and sentence splitting fails completely.
+      // pdf.js marks the end of a visual line. Without this every page is one
+      // run-on string and sentence splitting fails entirely.
       if (item.hasEOL) { parts.push(line); line = ""; } else { line += " "; }
     }
     if (line.trim()) parts.push(line);
@@ -200,8 +199,8 @@ async function extractPdf(file: File): Promise<{ text: string; note?: string }> 
  * DOCX extraction without a Word library.
  *
  * A .docx is a zip whose `word/document.xml` holds the text in `<w:t>` elements.
- * Unzipping with fflate (~8 KB) and pulling those out is a fraction of the cost
- * of a full OOXML parser, and we only need the prose.
+ * Unzipping with fflate (~8 KB) and pulling those out costs a fraction of a full
+ * OOXML parser, and only the prose is needed here.
  */
 async function extractDocx(file: File): Promise<string> {
   const { unzipSync } = await import("fflate");
@@ -224,15 +223,15 @@ async function extractDocx(file: File): Promise<string> {
 /**
  * HTML to text.
  *
- * Parsed with DOMParser into an inert document — it does not execute scripts,
- * load subresources, or touch the live DOM. Source HTML is untrusted data.
+ * Parsed with DOMParser into an inert document: no script execution, no
+ * subresource loading, no contact with the live DOM. Source HTML is untrusted.
  */
 export function extractHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
   doc.querySelectorAll("script,style,noscript,svg,nav,footer,header,aside,form,iframe")
     .forEach((el) => el.remove());
-  // Block elements need explicit breaks; innerText would give them, but it only
-  // works on rendered nodes and this document is never attached.
+  // Block elements need explicit breaks. innerText would supply them but only
+  // works on rendered nodes, and this document is never attached.
   doc.querySelectorAll("p,div,li,tr,br,h1,h2,h3,h4,h5,h6,section,article")
     .forEach((el) => el.append("\n"));
   const main = doc.querySelector("article,main,[role=main]") ?? doc.body;
@@ -242,15 +241,13 @@ export function extractHtml(html: string): string {
 /**
  * JSON/JSONL: flatten to labelled leaves.
  *
- * The key is the only thing that makes a scalar retrievable. `400` on its own
- * is unfindable — no question embeds near a bare number — whereas
- * `battery_hours: 400` answers "how many battery hours does it have". An
- * earlier version carried the key only for string values, which silently
- * stripped the label off every numeric field in the file and made exactly the
- * facts people ask about the ones that could not be found.
+ * The key is what makes a scalar retrievable. A bare `400` is unfindable, since
+ * no question embeds near a lone number, where `battery_hours: 400` answers "how
+ * many battery hours does it have". Keys are carried for every value type,
+ * numeric ones included.
  *
- * Nested paths are kept dotted for the same reason: `specs.weight_g: 99` says
- * what the 99 is, and the dotted form survives tokenisation as separate words.
+ * Nested paths stay dotted for the same reason: `specs.weight_g: 99` says what
+ * the 99 is, and the dotted form tokenises into separate words.
  */
 function extractJson(raw: string): string {
   const out: string[] = [];
@@ -266,8 +263,8 @@ function extractJson(raw: string): string {
       return;
     }
     if (Array.isArray(v)) {
-      // Arrays index by position, which is never worth embedding, so every
-      // element inherits the array's own label.
+      // Array indices are not worth embedding, so every element inherits the
+      // array's own label instead.
       for (const x of v) walk(x, path, depth + 1);
       return;
     }
@@ -281,7 +278,7 @@ function extractJson(raw: string): string {
   try {
     walk(JSON.parse(raw), "", 0);
   } catch {
-    // JSONL: one object per line, and a single bad line shouldn't lose the file.
+    // JSONL: one object per line, and one bad line should not lose the file.
     for (const line of raw.split("\n")) {
       if (!line.trim()) continue;
       try { walk(JSON.parse(line), "", 0); } catch { /* skip */ }
@@ -295,11 +292,10 @@ function extractJson(raw: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * URL ingestion goes through the Worker.
- *
- * Not for latency — the browser simply cannot fetch an arbitrary cross-origin
- * page and read the body. The Worker does the fetch, strips the markup, and
- * returns text. It enforces scheme, size and redirect limits; see worker/src.
+ * URL ingestion goes through the Worker, because the browser cannot fetch an
+ * arbitrary cross-origin page and read the body. The Worker fetches, strips the
+ * markup and returns text, enforcing scheme, size and redirect limits along the
+ * way; see `worker/src`.
  */
 export async function ingestUrl(url: string, workerBase: string): Promise<Extracted> {
   const trimmed = url.trim();

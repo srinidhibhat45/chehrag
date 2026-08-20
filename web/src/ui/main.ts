@@ -1,29 +1,25 @@
 /**
  * App wiring.
  *
- * Two timing paths, kept strictly separate, because conflating them is how
- * latency claims become dishonest:
+ * Two timing paths, kept strictly separate:
  *
- *   FAST PATH (measured, budget 200 ms) — embed, retrieve, fuse, rescore,
- *   guard, extract. Entirely in this browser, across both the shipped corpus
- *   and the user's own sources. This is what the chip under each answer
- *   reports, and it is the only thing that chip reports.
+ *   Fast path (measured, 200 ms budget) — embed, retrieve, fuse, rescore, guard,
+ *   extract. Entirely in the browser, across both the shipped corpus and the
+ *   user's sources. This is what the chip under each answer reports, and the
+ *   only thing it reports.
  *
- *   SLOW PATH (unmeasured, best effort) — Sarvam speech-to-text before the
+ *   Slow path (unmeasured, best effort) — Sarvam speech-to-text before the
  *   question exists, the model that writes the answer from the retrieved
- *   passages, and ElevenLabs or Sarvam speech after that. None of it may touch
+ *   passages, and ElevenLabs or Sarvam speech afterwards. None of it may touch
  *   the measured span.
  *
- * Writing the answer is on the slow path and is *not* optional to the product,
- * only to the guarantee. When no generator is configured the app still works —
- * it shows the passage that answers the question, labelled as a quotation
- * rather than dressed up as an answer — but that is a degraded mode and the
- * interface says so. The 200 ms number describes retrieval, is measured on
- * retrieval alone, and is reported next to a separate figure for the answer.
+ * Writing the answer is on the slow path but is not optional to the product.
+ * With no generator configured the app still works, showing the passage that
+ * matched, labelled as a quotation; that is a degraded mode and the interface
+ * says so.
  *
- * The status dots in the top bar are load-bearing for honesty. They report what
- * the Worker says it actually has keys for, so the interface never claims a
- * Sarvam or ElevenLabs integration it has not confirmed.
+ * Service availability comes from the Worker's `/health`, so the interface never
+ * claims a Sarvam or ElevenLabs integration it has not confirmed.
  */
 
 import { loadIndex } from "../retrieval/loader";
@@ -34,6 +30,7 @@ import { SourceStore } from "../sources/store";
 import { SourcesPanel } from "./sources-panel";
 import { Chat, type BotHandle } from "./chat";
 import { Orb } from "./orb";
+import { Curtain } from "./curtain";
 import { pickStt, sttAvailability, type SttEngine, type SttKind } from "../stt";
 import { Speaker, scriptLanguage, type TtsProvider } from "../tts/speak";
 import { generate, DEFAULT_GEN_CONFIG, type GenSource } from "../answer/generate";
@@ -48,6 +45,9 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
 
 const app = $("app");
 const orb = new Orb($("orb"), $("orb-caption"), $("orb-sub"));
+// Constructed at module scope rather than inside boot(): it is on screen from
+// the initial HTML, with the app already inert behind it.
+const curtain = new Curtain($("curtain"), app);
 const llmBreaker = new CircuitBreaker(3, 20_000);
 const speaker = new Speaker({
   workerBase: WORKER_BASE,
@@ -59,7 +59,7 @@ let encoder: BatchEncoder;
 let store: SourceStore;
 let chat: Chat;
 
-/** Set while a query is in flight, so voice partials don't stack up. */
+/** Set while a query is in flight, so voice partials do not stack up. */
 let asking = false;
 /** Session latency, for the studio readout. */
 const sessionTimes: number[] = [];
@@ -87,24 +87,15 @@ $("theme-btn").addEventListener("click", () => {
 
 const CORPUS_KEY = "chehrag-corpus";
 
-/** Opt-in, and remembered. Absent means off — a first visit starts empty. */
 /**
- * Is the provided MS MARCO-XI dataset searchable?
+ * Is the shipped MS MARCO-XI dataset searchable?
  *
- * ON by default, and the default is the requirement. The brief is "retrieves
- * relevant context from a provided dataset" — so the dataset has to be live the
- * moment the page opens. An evaluator who asks the first question and is told to
- * add a source first has been shown an empty app, whatever it could have done.
+ * On by default, so the app can answer from the first question rather than
+ * opening empty. Provenance is handled by attribution instead: every answer
+ * names the document it came from, and a corpus passage says so.
  *
- * An earlier revision started empty on provenance grounds: an answer out of a
- * 98,867-passage collection the visitor never chose is indistinguishable, to
- * them, from an answer out of their own document. That concern was real and is
- * now handled where it belongs — every answer names the document it came from,
- * and a corpus passage says so — rather than by disabling the dataset the system
- * exists to search.
- *
- * Reads `!== "0"` rather than `=== "1"`: an explicit opt-out is remembered, an
- * absent preference means on.
+ * Reads `!== "0"` rather than `=== "1"`, so an explicit opt-out is remembered
+ * while an absent preference means on.
  */
 function corpusPref(): boolean { return localStorage.getItem(CORPUS_KEY) !== "0"; }
 
@@ -115,10 +106,10 @@ function setCorpus(on: boolean): void {
 }
 
 /**
- * Reflect what is actually searchable, in the rail and in the welcome.
+ * Reflect what is searchable, in the rail and in the welcome.
  *
- * Tolerates a missing welcome: `Chat` removes that block as soon as the first
- * question is asked, and this runs again every time a source changes.
+ * Tolerates a missing welcome: `Chat` removes that block once the first question
+ * is asked, and this runs again on every source change.
  */
 function syncSources(): void {
   const on = engine?.corpusOn ?? corpusPref();
@@ -129,8 +120,8 @@ function syncSources(): void {
   toggle.setAttribute("aria-label",
     on ? "Stop searching MS MARCO-XI" : "Search MS MARCO-XI");
 
-  // The sample questions are questions about the Hindi corpus. Offering them
-  // while it is switched off would be offering a button that cannot work.
+  // The sample questions are about the Hindi corpus, so they are hidden when
+  // it is switched off rather than left as buttons that cannot work.
   const suggest = document.getElementById("suggest");
   if (suggest) suggest.hidden = !on;
 }
@@ -140,12 +131,11 @@ function syncSources(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * What the user can say they are speaking.
+ * What the user can declare they are speaking.
  *
- * `auto` is first and is the default because Sarvam genuinely identifies the
- * language and returns it with the transcript. On the browser-speech fallback
- * there is no such thing, so the note under the picker says so rather than
- * letting `auto` quietly mean "Hindi".
+ * `auto` is the default because Sarvam identifies the language and returns it
+ * with the transcript. The browser-speech fallback cannot, so the note under the
+ * picker says so rather than letting `auto` silently mean Hindi.
  */
 const LANGS: Array<{ tag: string; label: string }> = [
   { tag: "auto",  label: "Detect automatically" },
@@ -186,10 +176,9 @@ function askLang(): string { return $<HTMLSelectElement>("lang-sel").value; }
 /**
  * Are answers read aloud?
  *
- * On by default, and it applies to every question rather than only to spoken
- * ones. Speech is the output this is built around; making it conditional on
- * how the question arrived meant a typed question demonstrated half the
- * product. The keyboard is a way in, not a different mode.
+ * On by default, for every question rather than only spoken ones. Speech is the
+ * output this is built around, and the keyboard is a way in rather than a
+ * different mode.
  */
 let speakOn = localStorage.getItem("chehrag-speak") !== "0";
 
@@ -207,10 +196,9 @@ function setSpeak(on: boolean): void {
 /**
  * Show the keyboard.
  *
- * Hidden until asked for, because a text field next to a microphone is the
- * thing people reach for out of habit, and reaching for it here means never
- * finding out that speaking works. Once opened it stays open for the session —
- * someone who has chosen to type should not have to choose again per question.
+ * Hidden until asked for: a text field beside a microphone is what people reach
+ * for out of habit, and reaching for it here means never discovering that
+ * speaking works. Once opened it stays open for the session.
  */
 function setTyping(on: boolean): void {
   const stage = $("stage");
@@ -239,23 +227,20 @@ let wiring: Wiring = {
 };
 
 /**
- * Ask the Worker what it actually has keys for.
+ * Ask the Worker which keys it holds.
  *
- * Deliberately not inferred from `VITE_WORKER_BASE` being set. A Worker can be
- * deployed with a Sarvam key and no ElevenLabs key, or either one can be
- * revoked; the only reliable source for "is the voice requirement live" is the
- * Worker telling us.
+ * Not inferred from `VITE_WORKER_BASE` being set: a Worker can be deployed with
+ * a Sarvam key and no ElevenLabs key, and either can be revoked later.
  */
 async function probeWiring(): Promise<void> {
   const local = sttAvailability(WORKER_BASE);
   wiring.sttBrowser = local.browser;
 
-  // Probed unconditionally, not only when `VITE_WORKER_BASE` is set. With no
-  // Worker configured this is a same-origin request, which is exactly what the
-  // dev server answers — that is what lets `npm run dev` produce real answers
-  // from a key in `web/.env.local` with no Cloudflare account involved. In
-  // production without a Worker the SPA fallback returns HTML, `json()` throws,
-  // and everything correctly stays off.
+  // Probed unconditionally rather than only when `VITE_WORKER_BASE` is set.
+  // With no Worker configured this is a same-origin request, which the dev
+  // server answers — that is what lets `npm run dev` produce real answers from a
+  // key in `web/.env.local`. In production without a Worker the SPA fallback
+  // returns HTML, `json()` throws, and everything stays off.
   try {
     const r = await fetch(`${WORKER_BASE}/health`);
     const h = await r.json() as {
@@ -273,21 +258,18 @@ async function probeWiring(): Promise<void> {
 }
 
 /**
- * Reflect what the Worker actually confirmed.
+ * Reflect what the Worker confirmed.
  *
- * There used to be a row of lit/unlit dots here naming each provider. That is
- * an instrument panel, not a product: it asks the person using this to care
- * which vendor transcribes them. The honesty it existed for is kept — the note
- * under the voice pickers says in words which voice will speak and whether
- * speech input is the real path or the browser's fallback — but it is stated
- * where it changes what someone would do, and nowhere else.
+ * Stated in words under the voice pickers — which voice will speak, and whether
+ * speech input is the real path or the browser's fallback — rather than as a row
+ * of per-provider status dots, which asks the reader to care about the vendor.
  */
 function renderWiring(): void {
-  // Never before the index is up: a live lamp on a booting app records a
+  // Never before the index is up: a live lamp on a booting app would record a
   // question there is nothing to answer with.
   $<HTMLButtonElement>("orb").disabled = app.dataset.stage === "boot";
-  // Speech is the primary path, so its absence is a fact about the stage
-  // rather than a disabled button: the keyboard opens and stays open.
+  // Speech is the primary path, so its absence changes the stage rather than
+  // leaving a disabled button: the keyboard opens and stays open.
   $("stage").dataset.mic = micReady() ? "1" : "0";
   if (!micReady() && app.dataset.stage !== "boot") setTyping(true);
   updateVoiceNote();
@@ -324,37 +306,46 @@ function updateVoiceNote(): void {
 async function boot(): Promise<void> {
   const t0 = performance.now();
   wireLangs();
-  // Before the probe, so a remembered "answers silent" is on screen from the
-  // first frame rather than after the index finishes downloading.
+  // Before the probe, so a remembered "answers silent" shows from the first
+  // frame rather than after the index finishes downloading.
   setSpeak(speakOn);
   void probeWiring();
   checkIsolation();
 
-  // The index and the model download in parallel. They are independent, and
-  // serialising them would double the wait on a first visit for no reason.
+  // Independent, so they download in parallel; serialising them would double
+  // the wait on a first visit.
   const indexPromise = loadIndex("/index", (loaded, total, name) => {
-    // Cap the ring at 90% until the encoder is also up — a full ring next to a
-    // disabled input is a lie the user notices.
+    // Capped at 90% until the encoder is also up: a full ring beside a disabled
+    // input reads as finished when it is not.
     orb.setCharge(Math.min(0.9, loaded / total));
     $("orb-sub").textContent =
       `${(loaded / 1e6).toFixed(0)} MB of ~${(total / 1e6).toFixed(0)} MB · ${name}`;
+    curtain.indexProgress(loaded, total, name);
   });
-  const encoderPromise = createEncoder();
+  const encoderPromise = createEncoder((loaded, total) => curtain.modelProgress(loaded, total));
+
+  // Ticked off individually rather than after the `Promise.all` below: they
+  // finish at different times, and the step list exists to show which one is
+  // outstanding. Rejections are swallowed here only — `Promise.all` still sees
+  // them, and `boot()`'s caller reports them.
+  void indexPromise.then(() => curtain.stepDone("index"), () => { /* reported by boot() */ });
+  void encoderPromise.then(() => curtain.stepDone("model"), () => { /* reported by boot() */ });
 
   orb.set("dormant", "Lighting the lamp…");
   const [index, enc] = await Promise.all([indexPromise, encoderPromise]);
   encoder = enc;
   orb.setCharge(0.95);
   $("orb-sub").textContent = "warming up…";
+  curtain.stepRun("warm", "running");
 
-  // Thresholds are fitted offline by bench/calibrate.ts. If that has not been
-  // run, fall back to the defaults rather than blocking the app.
+  // Fitted offline by `bench/calibrate.ts`. If that has never run, fall back to
+  // the defaults rather than blocking the app.
   let cfg: RagConfig = { ...DEFAULT_CONFIG };
   try {
     const t = await (await fetch("/thresholds.json")).json();
     // Spread over the defaults rather than replacing them: calibrate.ts fits
-    // three of these fields and does not know about the rest, so a literal
-    // object here would silently reset every threshold it omits to undefined.
+    // three of these fields and knows nothing about the rest, so a literal
+    // object here would reset every threshold it omits to undefined.
     cfg = { ...cfg, thresholds: {
       ...cfg.thresholds,
       minTopScore: t.minTopScore, minAgreement: t.minAgreement,
@@ -375,19 +366,20 @@ async function boot(): Promise<void> {
   });
   engine.attachSources(store);
   // Applied before warmup so the console handle and the rail agree from the
-  // first frame. Warmup forces the corpus on internally regardless — it is
-  // warming code paths, not answering questions.
+  // first frame. Warmup forces the corpus on internally regardless, since it
+  // warms code paths rather than answering questions.
   engine.setCorpusEnabled(corpusPref());
   new SourcesPanel(store, { onChange: () => { engine.invalidate(); syncSources(); } });
   store.subscribe(() => syncSources());
-  // Sources added in a previous session replay from IndexedDB. Not awaited on
-  // the critical path — the corpus is already searchable without them.
+  // Sources from a previous session replay from IndexedDB. Not awaited: the
+  // corpus is already searchable without them.
   void store.restore().catch(() => { /* corrupt store: start empty */ });
 
   chat = new Chat($("thread"), { onSpeak: (text, btn) => void speakAnswer(text, btn) });
 
   await engine.warmup();
   orb.setCharge(1);
+  curtain.stepDone("warm");
 
   const chunks = Object.values(index.manifest.strategies).reduce((a, s) => a + s.count, 0);
   $("corpus-meta").textContent =
@@ -400,12 +392,15 @@ async function boot(): Promise<void> {
   $<HTMLInputElement>("q").disabled = false;
   $<HTMLButtonElement>("go").disabled = false;
   renderWiring();
+  // Last: raising the curtain claims the app is usable, so everything behind it
+  // has to be.
+  curtain.lift();
 
   orb.set("idle", "Ready", micReady()
     ? "tap the lamp, or press space, and speak"
     : "no microphone here — the keyboard is open below");
-  // Deliberately not focusing the text field: it is hidden, and focusing the
-  // lamp instead means the first Enter or Space starts listening.
+  // Not the text field, which is hidden. Focusing the lamp means the first
+  // Enter or Space starts listening.
   if (micReady()) $<HTMLButtonElement>("orb").focus();
 }
 
@@ -415,13 +410,12 @@ function micReady(): boolean { return wiring.sttSarvam || wiring.sttBrowser; }
  * The one hosting mistake that costs the budget.
  *
  * Threaded WASM needs `SharedArrayBuffer`, which needs cross-origin isolation,
- * which needs COOP + COEP on the response that served this page. Get the
- * headers wrong and onnxruntime silently drops to a single thread: the embed
- * stage — the dominant cost in the query — roughly triples, nothing errors, and
- * the only symptom is that the numbers are worse than they were on localhost.
+ * which needs COOP + COEP on the response serving this page. With the headers
+ * wrong, onnxruntime drops to a single thread: the embed stage roughly triples,
+ * nothing errors, and the only symptom is worse numbers than on localhost.
  *
  * `public/_headers` is the production copy of `vite.config.ts`'s dev headers.
- * If the host does not honour it, this is the line that says so.
+ * This is what reports a host that does not honour it.
  */
 function checkIsolation(): void {
   if (crossOriginIsolated) return;
@@ -445,8 +439,7 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
   asking = true;
   $<HTMLInputElement>("q").value = "";
   $("transcript").hidden = true;
-  // The lamp is the hero of an empty room and an oversized one above a
-  // conversation. It shrinks the moment there is something to read.
+  // The lamp shrinks once there is something to read above it.
   app.dataset.asked = "1";
 
   chat.addUser(q, opts.voice);
@@ -455,21 +448,20 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
 
   try {
     // Bulk embedding is paused for the duration. Ingestion already yields
-    // between small batches, but pausing removes even that interference — the
-    // budget is a promise, and a promise that only holds when nothing else is
-    // happening is not one.
+    // between small batches; pausing removes even that interference, so the
+    // budget holds while a document is indexing.
     encoder.pauseBulk();
     // On the inline-WebGL fallback the fire shares this thread, so it stops for
-    // the measured span. On the worker path this is a no-op.
+    // the measured span. A no-op on the worker path.
     orb.freeze();
 
     const res = await engine.ask(q, { skipCache: true });
 
     const answered = res.status === "answered";
-    // Generation is attempted whenever retrieval succeeded and a generator is
-    // configured. `generating: true` tells the message to hold a waiting state
-    // instead of painting the retrieved passage — which would otherwise flash
-    // on screen for a moment and then be replaced by the real answer.
+    // Attempted whenever retrieval succeeded and a generator is configured.
+    // `generating: true` holds the message in a waiting state rather than
+    // painting the retrieved passage, which would flash on screen and then be
+    // replaced by the real answer.
     const willGenerate = answered && wiring.llm;
 
     handle.resolve(res, {
@@ -477,13 +469,12 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
       truncated: store?.truncated ?? false,
       generating: willGenerate,
     });
-    // Only questions that were actually searched belong in the session figures.
-    // A refusal for want of a source never reached the encoder, and folding its
-    // 0.1 ms into the readout would flatter every number in it.
+    // Only questions that were searched belong in the session figures. A
+    // refusal for want of a source never reached the encoder, and folding its
+    // 0.1 ms in would flatter every number here.
     //
-    // Generation time is deliberately excluded too. This readout is the
-    // retrieval guarantee's own instrument; mixing a network round trip into it
-    // would make the one number this project is graded on meaningless.
+    // Generation time is excluded for the same reason: this readout measures
+    // retrieval, and a network round trip is not part of it.
     if (res.refusal !== "NO_SOURCES") {
       sessionTimes.push(res.totalMs);
       renderSessionStats();
@@ -491,27 +482,21 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
 
     orb.set(answered ? "answered" : "refused", answered ? "Answered" : "Declined", "");
 
-    // Refusing for want of a source and leaving the user to find the Add
-    // button themselves is a dead end. Put the panel in front of them.
+    // Refusing for want of a source and leaving the user to find the Add button
+    // is a dead end, so the panel opens itself.
     if (res.refusal === "NO_SOURCES") openAddPanel();
 
-    // Speaking waits for the written answer. Reading a raw passage aloud is
-    // worse than reading a sentence aloud, and the whole point of generating is
-    // that there is now a sentence.
-    //
-    // It no longer depends on `opts.voice`. Answers are spoken because speech
-    // is the output, not as a reply in kind to a spoken question — a typed
-    // question used to get a silent answer, which showed half the product to
-    // anyone who reached for the keyboard first.
+    // Speaking waits for the written answer: a generated sentence reads aloud
+    // far better than a raw passage. Independent of `opts.voice`, because speech
+    // is the output rather than a reply in kind to a spoken question.
     const speakWhenReady = answered && speakOn;
 
     if (willGenerate) {
       void writeAnswer(q, res, handle, speakWhenReady);
     } else if (answered) {
-      // No generator configured. The passage still answers the question, but it
-      // is a passage — presenting it as though the system had written it is the
-      // exact thing this release exists to stop doing, and it does not become
-      // acceptable just because the reason is a missing key.
+      // No generator configured. The passage still contains the answer, but it
+      // is a passage, and is labelled as one rather than presented as something
+      // the system wrote.
       handle.fallBackToExtract(
         "No answer writer is configured, so this is the passage that matched — quoted, not answered.",
       );
@@ -539,21 +524,16 @@ function renderSessionStats(): void {
 /**
  * Write the answer.
  *
- * Off the measured path by construction — this is a network round trip to a
- * model, and no amount of engineering makes that fit in 200 ms. What it is
- * *not* is optional to the product: retrieval finds the passage that contains
- * the answer, and this is the step that turns it into one. The name of the old
- * version of this function was `synthesize`, and it appended its output under
- * the raw passage as a "rewrite"; that framing is what let the app ship
- * answering "what is my name" with the line of the CV rather than the name.
+ * Off the measured path by construction: this is a network round trip to a
+ * model. It is not optional to the product, though — retrieval finds the passage
+ * that contains the answer, and this turns it into one.
  *
- * Three ways it can end, all of them leaving something usable on screen:
+ * Three ways it can end, each leaving something usable on screen:
  *
  *   answer         streamed into the bubble, then checked against the passages
  *                  it came from (gate 3) before it is allowed to stand
- *   insufficient   the model read the passages and said they do not answer the
- *                  question — which is a refusal the retrieval gate did not
- *                  catch, and is worth more than a confident wrong answer
+ *   insufficient   the model read the passages and reports that they do not
+ *                  answer the question — a refusal the retrieval gate missed
  *   unavailable    no key, worker down, timeout — the retrieved passage is
  *                  shown instead, labelled as a quotation
  */
@@ -577,17 +557,16 @@ async function writeAnswer(
       },
     }, { ...DEFAULT_GEN_CONFIG, base: WORKER_BASE }),
   ).catch((): { kind: "unavailable"; reason: string } => (
-    // The breaker is open after repeated failures. Not an error condition —
-    // it is the system declining to make a call it expects to fail.
+    // The breaker is open after repeated failures: the system is declining to
+    // make a call it expects to fail.
     { kind: "unavailable", reason: "generator unavailable" }
   ));
 
   if (outcome.kind === "answer") {
-    // Gate 3. A fluent model can add a fact that was never in the passages, and
-    // the one thing this product cannot do is state something the document does
-    // not. Checked after streaming rather than before, because holding the whole
-    // answer back to verify it would cost the entire benefit of streaming, and a
-    // rare retraction is cheaper than a universal delay.
+    // Gate 3. A fluent model can add a fact that was never in the passages.
+    // Checked after streaming rather than before: holding the whole answer back
+    // to verify it costs the entire benefit of streaming, and a rare retraction
+    // is cheaper than a universal delay.
     if (engine.verifySynthesis(outcome.text, base.citations).pass) {
       handle.endGeneration(outcome.ms);
       if (speak) void speakAnswer(outcome.text, null, handle);
@@ -601,9 +580,9 @@ async function writeAnswer(
       "This is the closest thing I found, but I couldn't turn it into a direct answer to your question.",
     );
   } else {
-    // "Not configured" and "configured but not answering right now" are
-    // different facts about the user's setup, and telling them the first when
-    // the second is true sends them to check a key that is fine.
+    // "Not configured" and "configured but not answering" are different facts
+    // about the setup, and reporting the first sends the user to check a key
+    // that is fine.
     handle.fallBackToExtract(
       outcome.reason === "no generator configured"
         ? "No answer writer is set up, so this is the passage that matched — quoted, not answered."
@@ -621,10 +600,9 @@ async function writeAnswer(
 /**
  * Speak an answer.
  *
- * The language comes from the STT result when there is one — a model that heard
- * the speaker knows more than any heuristic — and otherwise from the script of
- * the answer text. See `scriptLanguage` for why that is script detection and
- * does not pretend to be more.
+ * The language comes from the STT result when there is one, since a model that
+ * heard the speaker knows more than any heuristic, and otherwise from the script
+ * of the answer text. See `scriptLanguage`.
  */
 let lastHeardLanguage: string | null = null;
 
@@ -695,9 +673,9 @@ async function toggleMic(): Promise<void> {
       if (e.type === "partial") {
         live.dataset.partial = "1";
         live.textContent = e.text;
-        // Speculative retrieval: answer the prefix while they are still
-        // talking, so the final answer is already warm when they stop. Cached
-        // and unmeasured — it never appears in the reported numbers.
+        // Speculative retrieval: answer the prefix while the user is still
+        // talking, so the final answer is warm when they stop. Cached and
+        // unmeasured, so it never appears in the reported numbers.
         if (e.text.length > 12 && e.text !== lastPartial && !asking) {
           lastPartial = e.text;
           void engine.ask(e.text).catch(() => { /* speculative — failure is free */ });
@@ -708,21 +686,20 @@ async function toggleMic(): Promise<void> {
         if (e.language) lastHeardLanguage = e.language;
         void stopMic().then(() => ask(e.text, { voice: true }));
       } else if (e.type === "notice") {
-        // The engine changed how it is working and is still working. Say so
-        // and keep listening — tearing it down here is what turned a working
-        // batch fallback into a null dereference.
+        // The engine changed how it works and is still working. Report it and
+        // keep listening; tearing it down here would destroy the fallback it
+        // has just set up.
         live.dataset.partial = "1";
         live.textContent = e.message;
         orb.set("listening", "Listening", "tap the lamp again when you're done");
       } else if (e.type === "error") {
         live.dataset.error = "1";
         live.textContent = e.message;
-        // Back to Ready, not to "Looking…": nothing was heard, so nothing is
-        // being looked up. The caption is the app's status line now, and a
-        // search that is not happening is the wrong thing for it to claim.
+        // Back to Ready rather than "Looking…": nothing was heard, so nothing
+        // is being looked up, and the caption is the app's status line.
         void stopMic("idle");
-        // Speech just failed in front of them. Open the keyboard rather than
-        // leaving a lamp that has visibly stopped working as the only way in.
+        // Speech has visibly failed, so open the keyboard rather than leaving
+        // a lamp that just stopped working as the only way in.
         setTyping(true);
       }
     },
@@ -734,11 +711,10 @@ async function toggleMic(): Promise<void> {
     return;
   }
   // Held locally as well as in `stt`, because `start()` is a suspension point
-  // and this engine can be torn down inside it: a recogniser may report an
-  // error, or a final transcript, before it reports that it started, and
-  // `stopMic` nulls `stt` from that callback. Reading the module-level
-  // variable after the await then dereferences null, and the useful message
-  // the engine had already put on screen is overwritten by the wreckage.
+  // and the engine can be torn down inside it: a recogniser may report an error
+  // or a final transcript before it reports that it started, and `stopMic` nulls
+  // `stt` from that callback. Reading the module-level variable after the await
+  // would then dereference null.
   const sttEngine = picked.engine;
   stt = sttEngine;
   sttKind = picked.kind;
@@ -747,8 +723,8 @@ async function toggleMic(): Promise<void> {
     await sttEngine.start();
     if (stt !== sttEngine) return;   // superseded or stopped while starting
     recording = true;
-    // The fire pulses with the voice. Without a stream (permission granted but
-    // Web Audio unavailable) it simply stays lit without the pulse.
+    // The fire pulses with the voice. Without a stream — permission granted but
+    // Web Audio unavailable — it stays lit without the pulse.
     const stream = sttEngine.micStream;
     if (stream) orb.listenTo(stream);
     if (sttKind === "browser") {
@@ -760,7 +736,7 @@ async function toggleMic(): Promise<void> {
     $("stage").dataset.listening = "0";
     orb.set("idle", "Ready", "");
     // A refused microphone is the one case where the keyboard has to appear
-    // without being asked for: there is otherwise no way to ask anything.
+    // unasked, since there is otherwise no way in at all.
     setTyping(true);
   }
 }
@@ -778,10 +754,9 @@ async function stopMic(next: "thinking" | "idle" = "thinking"): Promise<void> {
   stt = null;
   await s?.stop().catch(() => { /* already closed */ });
 
-  // A recogniser that is asked to stop is not obliged to emit a final. The
-  // browser one sometimes does not, and the caption would then sit on
-  // "Looking…" for a search that never started — which, now that the caption
-  // is the app's status line, is the lamp lying about what it is doing.
+  // A recogniser asked to stop is not obliged to emit a final, and the browser
+  // one sometimes does not. Without this the caption sits on "Looking…" for a
+  // search that never started.
   if (next === "thinking") {
     setTimeout(() => {
       if (!asking && !recording && orb.current === "thinking") {
@@ -800,8 +775,7 @@ $("ask-form").addEventListener("submit", (e) => {
   void ask($<HTMLInputElement>("q").value);
 });
 // Implicit form submission covers Enter in every browser, but not every
-// embedded webview or automation layer dispatches the default action. This
-// costs nothing and removes the failure mode where the key does nothing at all.
+// embedded webview or automation layer dispatches the default action.
 $("q").addEventListener("keydown", (e) => {
   const ev = e as KeyboardEvent;
   if (ev.key === "Enter" && !ev.isComposing) {
@@ -812,12 +786,9 @@ $("q").addEventListener("keydown", (e) => {
 $("orb").addEventListener("click", () => void toggleMic());
 
 /**
- * Space is the microphone.
- *
- * A voice-first app whose only way in is a mouse target is not voice-first for
- * anyone at a keyboard. Space is the obvious key and costs nothing, provided it
- * yields to whatever already wants it: a focused field, a focused button (the
- * browser's own activation already fires there), and a held key repeating.
+ * Space is the microphone, so the app is reachable without a mouse. It yields to
+ * anything that already wants the key: a focused field, a focused button (where
+ * the browser's own activation fires), and a held key repeating.
  */
 document.addEventListener("keydown", (e) => {
   if (e.code !== "Space" || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -879,11 +850,14 @@ wirePane("rail-toggle", "rail");
 wirePane("studio-toggle", "studio");
 
 boot().catch((e) => {
-  orb.set("refused", "The lamp wouldn't light",
-    e instanceof Error ? e.message : String(e));
+  const message = e instanceof Error ? e.message : String(e);
+  orb.set("refused", "The lamp wouldn't light", message);
+  // The orb is behind the curtain, so reporting only there would leave the
+  // visitor watching a stalled bar with no explanation.
+  curtain.fail(message);
 });
 
-// Exposed for debugging in the console; not used by the app itself.
+// Exposed for console debugging. Not used by the app itself.
 Object.assign(window as unknown as Record<string, unknown>, {
   chehrag: {
     get engine() { return engine; },

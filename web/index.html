@@ -15,7 +15,11 @@
   <link rel="stylesheet" href="/src/ui/styles.css" />
 </head>
 <body>
-<div class="app" id="app" data-stage="boot">
+<!-- `inert` from the first frame, lifted by curtain.ts once boot finishes.
+     Every control in here is wired during boot(); until then they are not
+     merely disabled, they are unwired, and letting someone tab into them
+     teaches them the app ignores them. -->
+<div class="app" id="app" data-stage="boot" inert>
 
   <!-- ─── top bar ─────────────────────────────────────────────────────── -->
   <header class="topbar">
@@ -243,6 +247,84 @@
 
   <div class="scrim" id="scrim" hidden></div>
 </div>
+
+<!-- ─── first-run curtain ──────────────────────────────────────────────
+     Rendered from the initial HTML, before any module has parsed, so the
+     first frame a visitor sees is this rather than a page of dead controls.
+     See `src/ui/curtain.ts` for why it is modal. -->
+<div class="curtain" id="curtain" role="dialog" aria-modal="true"
+     aria-labelledby="curtain-h" data-state="loading">
+  <div class="curtain-panel">
+    <span class="curtain-lamp" aria-hidden="true"></span>
+
+    <h2 class="curtain-h" id="curtain-h">Lighting the lamp</h2>
+    <p class="curtain-why">
+      Chehrag searches an index that lives in this browser — nothing is
+      uploaded, and no question waits on a network. It has to arrive first.
+    </p>
+
+    <p class="curtain-error" id="curtain-error" hidden></p>
+
+    <div class="curtain-bar" id="curtain-bar" role="progressbar"
+         aria-labelledby="curtain-h" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <span class="curtain-fill" id="curtain-fill"></span>
+    </div>
+
+    <ol class="curtain-steps" id="curtain-steps">
+      <li class="curtain-step" data-step="index" data-state="run">
+        <span class="curtain-tick" aria-hidden="true"></span>
+        <span class="curtain-step-k">Search index</span>
+        <span class="curtain-step-v" id="curtain-v-index">starting</span>
+      </li>
+      <li class="curtain-step" data-step="model" data-state="run">
+        <span class="curtain-tick" aria-hidden="true"></span>
+        <span class="curtain-step-k">Language model</span>
+        <span class="curtain-step-v" id="curtain-v-model">starting</span>
+      </li>
+      <li class="curtain-step" data-step="warm" data-state="wait">
+        <span class="curtain-tick" aria-hidden="true"></span>
+        <span class="curtain-step-k">Warming up</span>
+        <span class="curtain-step-v" id="curtain-v-warm">waiting</span>
+      </li>
+    </ol>
+
+    <p class="curtain-foot" id="curtain-foot">One time only — after this it opens from cache.</p>
+
+    <button class="btn curtain-retry" id="curtain-retry" type="button" hidden>Reload</button>
+
+    <!-- Coarse updates only. The byte counter changes many times a second and
+         announcing every tick would make the page unusable with a screen
+         reader; this speaks once per phase. -->
+    <p class="curtain-sr" id="curtain-sr" role="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<!-- The curtain is up and `.app` is inert from the first frame, which means a
+     module that never runs at all — a chunk 404 after a bad deploy, a CSP that
+     blocks the import, a parse error — would leave a visitor staring at a bar
+     that never moves with no way past it. `curtain.ts` cannot report that: it
+     is the thing that did not load. So the net is inline, classic, and runs
+     before the module.
+
+     It keys on a flag the Curtain constructor sets, not on a timer against the
+     download — a cold first visit on a slow connection is legitimately long,
+     and this must not fire on one. If the module is alive, its own stall
+     detector owns the "taking too long" case. -->
+<script>
+  setTimeout(function () {
+    var c = document.getElementById("curtain");
+    if (!c || c.hidden || c.dataset.wired === "1") return;
+    c.dataset.state = "failed";
+    document.getElementById("curtain-h").textContent = "The lamp wouldn't light";
+    var e = document.getElementById("curtain-error");
+    e.textContent = "Chehrag's code didn't load. This is usually a stale cache or a blocked script.";
+    e.hidden = false;
+    document.getElementById("curtain-foot").textContent = "Nothing was uploaded and nothing was lost.";
+    var r = document.getElementById("curtain-retry");
+    r.hidden = false;
+    r.onclick = function () { location.reload(); };
+  }, 15000);
+</script>
 
 <script type="module" src="/src/ui/main.ts"></script>
 </body>

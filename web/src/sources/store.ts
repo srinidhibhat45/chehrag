@@ -1,19 +1,17 @@
 /**
  * The user's own sources: add, index, persist, search, remove.
  *
- * The lifecycle of one source is ingest -> passages -> chunks -> embed ->
- * quantise -> UserIndex, and everything except the last two steps is cheap. The
- * embedding step is the whole cost, so the design decisions here are all about
- * it:
+ * One source runs ingest -> passages -> chunks -> embed -> quantise ->
+ * UserIndex. Everything but the last two steps is cheap, so embedding drives
+ * the design here:
  *
- *   - it runs off-thread, in small batches, so a query never queues behind it
- *   - it is cancellable, because a 400-page PDF is minutes of work
- *   - its output is persisted, so it happens exactly once per document
+ *   - off-thread, in small batches, so a query never queues behind it
+ *   - cancellable, because a 400-page PDF is minutes of work
+ *   - persisted, so it happens exactly once per document
  *
- * Persistence stores the *quantised* form — binary codes and int8 vectors — not
- * the float embeddings. That is 32x smaller for the codes and 4x for the
- * passage vectors, and it is precisely what search needs, so a reload replays
- * straight into the index with no re-quantisation.
+ * Persistence stores the quantised form — binary codes and int8 vectors — not
+ * the float embeddings: 32x smaller for the codes, 4x for the passage vectors,
+ * and exactly what search needs, so a reload replays straight into the index.
  */
 
 import { UserIndex, type StrategyBucket } from "./flat";
@@ -24,7 +22,7 @@ import { ingestFile, ingestPaste, ingestUrl, IngestError, type Extracted, type S
 
 export type SourceStatus = "indexing" | "ready" | "error";
 
-/** Shared empty result — a query with no user sources must not allocate. */
+/** Shared empty result, so a query with no user sources allocates nothing. */
 const EMPTY: StrategyBucket[] = [];
 
 export interface Source {
@@ -43,7 +41,7 @@ export interface Source {
   error?: string;
 }
 
-/** Beyond this a single document is doing more harm than good: ingestion takes
+/** Beyond this a single document costs more than it is worth: ingestion takes
  *  minutes and the flat scan starts eating into the query budget. */
 const MAX_CHUNKS_PER_SOURCE = 20_000;
 
@@ -130,9 +128,8 @@ export class SourceStore {
 
   // -- search --------------------------------------------------------------
 
-  /** Bounded flat search, bucketed by strategy. Returns nothing at all when no
-   *  source is enabled, so the corpus-only path pays zero cost for a feature it
-   *  isn't using. */
+  /** Bounded flat search, bucketed by strategy. Returns nothing when no source
+   *  is enabled, so the corpus-only path pays nothing for this. */
   search(q: Float32Array, k: number): StrategyBucket[] {
     if (!this.hasEnabled) return EMPTY;
     return this.index.search(q, k);
@@ -154,9 +151,9 @@ export class SourceStore {
   }
 
   /**
-   * Run one source all the way through. The Source record is published as soon
-   * as extraction succeeds, in `indexing` state, so the panel shows real
-   * progress instead of freezing on an empty list.
+   * Run one source end to end. The Source record is published as soon as
+   * extraction succeeds, in `indexing` state, so the panel shows progress
+   * instead of freezing on an empty list.
    */
   private async ingest(kind: SourceKind, extract: () => Promise<Extracted>): Promise<Source> {
     const ex = await extract();          // throws IngestError, surfaced by the caller
@@ -197,8 +194,8 @@ export class SourceStore {
 
     let chunks = chunkPassages(passages, src.title);
     if (chunks.length > MAX_CHUNKS_PER_SOURCE) {
-      // Trim from the end — chunks are emitted in passage order, so this keeps a
-      // contiguous prefix of the document rather than a random sample of it.
+      // Trimmed from the end. Chunks are emitted in passage order, so this
+      // keeps a contiguous prefix rather than a random sample.
       chunks = chunks.slice(0, MAX_CHUNKS_PER_SOURCE);
       const lastParent = chunks[chunks.length - 1].parent;
       passages.length = lastParent + 1;
@@ -214,8 +211,8 @@ export class SourceStore {
     const chunkStrategy = new Uint8Array(nChunks);
     const p8 = new Int8Array(nPassages * dim);
     const pScale = new Float32Array(nPassages);
-    // A passage's vector is its own `whole` chunk — the embedder would produce
-    // exactly the same vector twice, so we reuse it instead.
+    // A passage's vector is its own `whole` chunk, so it is reused rather than
+    // embedded a second time for the identical result.
     const wholeSeen = new Uint8Array(nPassages);
 
     const BATCH = 32;
@@ -240,7 +237,7 @@ export class SourceStore {
 
       src.progress = Math.min(0.99, (start + slice.length) / nChunks);
       this.emit();
-      // Yield so the panel actually repaints between batches.
+      // Yield so the panel repaints between batches.
       await new Promise<void>((r) => setTimeout(r, 0));
     }
 
@@ -250,7 +247,7 @@ export class SourceStore {
   /**
    * Attach a built source to the live index.
    *
-   * Local passage indices become global here: the index keeps one flat passage
+   * Local passage indices become global here. The index keeps one flat passage
    * space across all sources, so every stored `chunkParent` is offset by the
    * base ordinal this source was granted.
    */
@@ -294,9 +291,9 @@ export class SourceStore {
     if (!s) return;
     if (s.status === "indexing") { this.cancel(id); return; }
     this.index.removeSource(id);
-    // Passage text is left in place: ordinals are permanent index keys, and
-    // renumbering them would invalidate every surviving chunk's parent. The
-    // orphans are unreachable because no chunk points at them any more.
+    // Passage text stays in place: ordinals are permanent index keys, and
+    // renumbering would invalidate every surviving chunk's parent. The orphans
+    // are unreachable, since no chunk points at them any more.
     for (let i = 0; i < this.passageSource.length; i++) {
       if (this.passageSource[i] === id) this.passages[i] = "";
     }
@@ -341,9 +338,8 @@ export class SourceStore {
 
     const { dim, codeWords, model } = this.deps;
     for (const row of rows.sort((a, b) => a.addedAt - b.addedAt)) {
-      // Vectors from a different model or a different PCA geometry are not
-      // comparable with the shipped index. Dropping them is the only safe
-      // action — keeping them would corrupt ranking invisibly.
+      // Vectors from a different model or PCA geometry are not comparable with
+      // the shipped index, and keeping them would corrupt ranking invisibly.
       if (row.model !== model || row.dim !== dim || row.codeWords !== codeWords) {
         void this.forget(row.id);
         continue;
@@ -369,8 +365,8 @@ export class SourceStore {
   private async persist(src: Source): Promise<void> {
     const db = await this.openDb();
     if (!db) return;
-    // Re-derive this source's slice from the live index rather than holding a
-    // second copy in memory for the lifetime of the session.
+    // Re-derived from the live index rather than held as a second in-memory
+    // copy for the lifetime of the session.
     const snap = this.snapshot(src.id);
     if (!snap) return;
     const row: StoredSource = {
