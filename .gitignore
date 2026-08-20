@@ -34,3 +34,8 @@ pipeline/data/*.log
 # the 111 MB corpus subset and the 578 MB model, none of which are here. The
 # largest single file is 24.1 MiB, under both GitHub's 100 MB limit and
 # Cloudflare Pages' 25 MiB one.
+
+# Resume log for bench/precompute.ts. The answers it produces ARE committed
+# (same argument as web/public/index/ above — regenerating them costs hours of
+# provider quota), but the per-query checkpoint is scratch.
+web/public/answers/.progress.jsonl

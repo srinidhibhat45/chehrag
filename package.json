@@ -24,6 +24,8 @@
     "bench:usersource": "npm --prefix web run bench:usersource",
     "verify:deploy": "./scripts/verify-deploy.sh",
     "keys": "./scripts/setup-keys.sh",
-    "keys:check": "./scripts/check-keys.sh"
+    "keys:check": "./scripts/check-keys.sh",
+    "precompute": "npm --prefix web run precompute",
+    "bench:precomputed": "npm --prefix web run bench:precomputed"
   }
 }

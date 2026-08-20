@@ -11,11 +11,10 @@
  *   - sweep the score threshold over the calibration split
  *   - pick the operating point, then report it on the holdout
  *
- * Objective — and this changed once we measured, which is the point of measuring.
+ * Objective, which measurement changed.
  *
- * Maximising F1 on abstention selected threshold 0.68 and produced a system that
- * refused 392 of 549 answerable queries: 71% over-refusal. Technically optimal,
- * practically useless.
+ * Maximising F1 on abstention selects threshold 0.68 and refuses 392 of 549
+ * answerable queries: 71% over-refusal, technically optimal and useless.
  *
  * The reason is that MS MARCO's "unanswerable" split is adversarial. Those
  * queries still carry ten topically-relevant passages retrieved by the original
@@ -28,10 +27,10 @@
  * queries (bench/offtopic.ts), threshold 0.50 blocks 7/8 while keeping 84% of
  * in-corpus queries answerable.
  *
- * So selection is now by EXPLICIT COVERAGE POLICY rather than F1: maximise
+ * So selection is by an explicit coverage policy rather than F1: maximise
  * abstention recall subject to still answering at least MIN_COVERAGE of
- * answerable queries. That target is a product decision, stated openly, not an
- * artefact of an objective function.
+ * answerable queries. That target is a product decision rather than an artefact
+ * of an objective function.
  */
 
 /** Answer at least this share of answerable queries. Product decision. */

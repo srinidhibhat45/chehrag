@@ -1,30 +1,24 @@
 /**
- * Spoken answers.
+ * Spoken answers, routed across two providers because for this corpus they are
+ * not interchangeable:
  *
- * The brief allows Sarvam *or* ElevenLabs. This uses both, because for this
- * corpus they are not interchangeable and picking one would mean either losing
- * voice quality or losing languages:
+ *   ElevenLabs `eleven_flash_v2_5` — ~75 ms model latency across 32 languages,
+ *   but of the fourteen in MSMARCO-XI it covers only Hindi and Tamil.
  *
- *   ElevenLabs `eleven_flash_v2_5`  — ~75 ms model latency, 32 languages, but
- *   of the fourteen languages in MSMARCO-XI it covers only Hindi and Tamil.
+ *   Sarvam `bulbul:v2` — native Indic, covering Bengali, Gujarati, Kannada,
+ *   Malayalam, Marathi, Odia, Punjabi and Telugu, exactly the set ElevenLabs
+ *   leaves out.
  *
- *   Sarvam `bulbul:v2` — native Indic, covers Bengali, Gujarati, Kannada,
- *   Malayalam, Marathi, Odia, Punjabi and Telugu, which is exactly the set
- *   ElevenLabs leaves out.
+ * So a language goes to ElevenLabs when ElevenLabs speaks it and to Sarvam
+ * otherwise, which is the only arrangement under which every language in the
+ * corpus can be spoken at all.
  *
- * So the router sends a language to ElevenLabs when ElevenLabs speaks it and to
- * Sarvam otherwise. That is not hedging — it is the only arrangement under
- * which every language the retrieval corpus contains can actually be spoken.
+ * The browser's `speechSynthesis` sits under both as a last resort, labelled as
+ * a fallback wherever it is used, so the interface stays demonstrable with no
+ * keys configured.
  *
- * The browser's own `speechSynthesis` sits underneath both as a last resort. It
- * is not part of the requirement and is labelled as a fallback everywhere it is
- * used; it exists so the interface is still demonstrable with no keys
- * configured at all.
- *
- * ── latency ───────────────────────────────────────────────────────────────
- * None of this is inside the 200 ms budget and none of it is measured against
- * it. Speech happens after an answer already exists on screen. The number
- * reported next to an answer is retrieval, and speaking is downstream of it.
+ * None of this is inside the 200 ms budget or measured against it: speech
+ * happens after an answer already exists on screen.
  */
 
 export type TtsProvider = "elevenlabs" | "sarvam" | "browser" | "none";
@@ -37,10 +31,8 @@ export interface SpeakResult {
   el: HTMLAudioElement | null;
 }
 
-/**
- * Languages `eleven_flash_v2_5` speaks, restricted to the ones this corpus can
- * produce. Everything else in MSMARCO-XI routes to Sarvam.
- */
+/** Languages `eleven_flash_v2_5` speaks, restricted to the ones this corpus can
+ *  produce. Everything else in MSMARCO-XI routes to Sarvam. */
 const ELEVEN_LANGS = new Set(["en", "hi", "ta"]);
 
 /** Sarvam `bulbul:v2` target languages, as BCP-47 tags the API expects. */
@@ -68,10 +60,8 @@ export class Speaker {
   constructor(private readonly opts: SpeakerOptions) {}
 
   /**
-   * Ask the Worker which voice back-ends actually have keys.
-   *
-   * Done once, at boot, so the UI can say "ElevenLabs" or "browser voice"
-   * truthfully instead of discovering it at the moment someone presses play.
+   * Ask the Worker which voice back-ends have keys. Done once at boot, so the UI
+   * can name the provider up front rather than discovering it at play time.
    */
   async probe(): Promise<{ elevenlabs: boolean; sarvam: boolean }> {
     if (this.probed) return this.available;
@@ -93,7 +83,7 @@ export class Speaker {
     const base = lang.split("-")[0].toLowerCase();
     if (this.available.elevenlabs && ELEVEN_LANGS.has(base)) return "elevenlabs";
     if (this.available.sarvam && SARVAM_TAGS[base]) return "sarvam";
-    if (this.available.elevenlabs) return "elevenlabs";   // its multilingual model may still cope
+    if (this.available.elevenlabs) return "elevenlabs";   // multilingual model may still cope
     if (typeof speechSynthesis !== "undefined") return "browser";
     return "none";
   }
@@ -111,8 +101,8 @@ export class Speaker {
   }
 
   /**
-   * Speak `text`. Resolves once audio has *started*, not once it has finished —
-   * the caller wants to wire up the orb envelope, not to block.
+   * Speak `text`. Resolves once audio has started rather than finished, so the
+   * caller can wire up the orb envelope without blocking.
    */
   async speak(text: string, lang: string): Promise<SpeakResult> {
     this.stop();
@@ -143,12 +133,12 @@ export class Speaker {
   /**
    * Fetch synthesised audio through the Worker and play it.
    *
-   * Deliberately a whole-blob fetch rather than MediaSource streaming. A spoken
-   * answer here is one or two sentences — under 4 seconds of audio — and at
-   * that length the MSE machinery (codec strings, buffer appends, the
-   * quirks-per-browser matrix) buys a couple of hundred milliseconds in
-   * exchange for a class of failure that is silent and hard to reproduce. The
-   * Worker still streams from the provider; only the last hop is buffered.
+   * A whole-blob fetch rather than MediaSource streaming. A spoken answer is one
+   * or two sentences, under four seconds of audio, and at that length MSE —
+   * codec strings, buffer appends, the per-browser quirks matrix — buys a couple
+   * of hundred milliseconds for a class of failure that is silent and hard to
+   * reproduce. The Worker still streams from the provider; only this hop is
+   * buffered.
    */
   private async speakRemote(text: string, lang: string, provider: TtsProvider): Promise<HTMLAudioElement> {
     const ctrl = new AbortController();
@@ -176,7 +166,7 @@ export class Speaker {
 
     const url = URL.createObjectURL(blob);
     // A fresh element per utterance: `createMediaElementSource` may be called
-    // only once for a given element, and the orb needs a source node each time.
+    // only once per element, and the orb needs a source node each time.
     const el = new Audio(url);
     el.preload = "auto";
     this.current = el;
@@ -189,7 +179,7 @@ export class Speaker {
     return el;
   }
 
-  /** Last resort. Never counted as satisfying the voice requirement. */
+  /** Last resort, and labelled as one wherever it is used. */
   private speakBrowser(text: string, lang: string): boolean {
     if (typeof speechSynthesis === "undefined") return false;
     try {
@@ -210,14 +200,13 @@ export class Speaker {
 /**
  * Guess the language of an answer from its script.
  *
- * Script detection, not language detection — and that distinction is the whole
- * reason this is honest rather than a lie by omission. Devanagari is shared by
- * Hindi, Marathi, Nepali and Sanskrit, so this cannot separate them and does
- * not pretend to. It exists to route audio to a voice that will not mangle the
- * text, and for that, script is the property that actually matters.
+ * Script detection, not language detection: Devanagari is shared by Hindi,
+ * Marathi, Nepali and Sanskrit, and this cannot separate them. It exists to
+ * route audio to a voice that will not mangle the text, and script is the
+ * property that matters for that.
  *
- * When a transcript from Sarvam carries a `language_code`, that is used instead
- * — an STT model that heard the speaker knows more than any script heuristic.
+ * A Sarvam transcript's `language_code` is used instead when there is one, since
+ * a model that heard the speaker knows more than any script heuristic.
  */
 export function scriptLanguage(text: string): string {
   const counts: Array<[string, number]> = [
@@ -234,7 +223,7 @@ export function scriptLanguage(text: string): string {
   ];
   let best = "en", bestN = 0;
   for (const [code, n] of counts) if (n > bestN) { best = code; bestN = n; }
-  // A stray Devanagari digit in an English sentence should not flip the voice.
+  // A stray Devanagari character in an English sentence must not flip the voice.
   return bestN >= 3 ? best : "en";
 }
 

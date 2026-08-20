@@ -34,6 +34,7 @@ import { Curtain } from "./curtain";
 import { pickStt, sttAvailability, type SttEngine, type SttKind } from "../stt";
 import { Speaker, scriptLanguage, type TtsProvider } from "../tts/speak";
 import { generate, DEFAULT_GEN_CONFIG, type GenSource } from "../answer/generate";
+import { loadPrecomputed, type PrecomputedAnswers } from "../answer/precomputed";
 
 const WORKER_BASE = import.meta.env.VITE_WORKER_BASE ?? "";
 
@@ -58,15 +59,15 @@ let engine: RagEngine;
 let encoder: BatchEncoder;
 let store: SourceStore;
 let chat: Chat;
+/** Answers written offline for the shipped corpus. Null when none shipped. */
+let precomputed: PrecomputedAnswers | null = null;
 
 /** Set while a query is in flight, so voice partials do not stack up. */
 let asking = false;
 /** Session latency, for the studio readout. */
 const sessionTimes: number[] = [];
 
-// ---------------------------------------------------------------------------
-// theme
-// ---------------------------------------------------------------------------
+// -- theme ------------------------------------------------------------------
 
 const savedTheme = localStorage.getItem("chehrag-theme");
 if (savedTheme === "light" || savedTheme === "dark") {
@@ -81,9 +82,7 @@ $("theme-btn").addEventListener("click", () => {
   orb.syncTheme();
 });
 
-// ---------------------------------------------------------------------------
-// what is searchable
-// ---------------------------------------------------------------------------
+// -- what is searchable -----------------------------------------------------
 
 const CORPUS_KEY = "chehrag-corpus";
 
@@ -126,9 +125,7 @@ function syncSources(): void {
   if (suggest) suggest.hidden = !on;
 }
 
-// ---------------------------------------------------------------------------
-// languages
-// ---------------------------------------------------------------------------
+// -- languages --------------------------------------------------------------
 
 /**
  * What the user can declare they are speaking.
@@ -169,9 +166,7 @@ function wireLangs(): void {
 
 function askLang(): string { return $<HTMLSelectElement>("lang-sel").value; }
 
-// ---------------------------------------------------------------------------
-// the two halves of voice
-// ---------------------------------------------------------------------------
+// -- the two halves of voice ------------------------------------------------
 
 /**
  * Are answers read aloud?
@@ -211,9 +206,7 @@ function setTyping(on: boolean): void {
   if (on && app.dataset.stage !== "boot") $<HTMLInputElement>("q").focus();
 }
 
-// ---------------------------------------------------------------------------
-// service status
-// ---------------------------------------------------------------------------
+// -- service status ---------------------------------------------------------
 
 interface Wiring {
   sttSarvam: boolean;
@@ -299,9 +292,7 @@ function updateVoiceNote(): void {
   $("voice-note").textContent = parts.join(" ");
 }
 
-// ---------------------------------------------------------------------------
-// boot
-// ---------------------------------------------------------------------------
+// -- boot -------------------------------------------------------------------
 
 async function boot(): Promise<void> {
   const t0 = performance.now();
@@ -375,6 +366,16 @@ async function boot(): Promise<void> {
   // corpus is already searchable without them.
   void store.restore().catch(() => { /* corrupt store: start empty */ });
 
+  // Answers written offline for the shipped corpus, if this build ships any.
+  // Not awaited either: a miss costs a live generation, which is what every
+  // question cost before the store existed.
+  void loadPrecomputed("/answers", index.manifest.builtAt, index.manifest.dim)
+    .then((p) => {
+      precomputed = p;
+      if (p) console.info(`[chehrag] ${p.size.toLocaleString()} precomputed answers (${p.model})`);
+    })
+    .catch(() => { /* no store shipped */ });
+
   chat = new Chat($("thread"), { onSpeak: (text, btn) => void speakAnswer(text, btn) });
 
   await engine.warmup();
@@ -429,9 +430,7 @@ function checkIsolation(): void {
   );
 }
 
-// ---------------------------------------------------------------------------
-// ask
-// ---------------------------------------------------------------------------
+// -- ask --------------------------------------------------------------------
 
 async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> {
   const q = text.trim();
@@ -458,11 +457,25 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
     const res = await engine.ask(q, { skipCache: true });
 
     const answered = res.status === "answered";
-    // Attempted whenever retrieval succeeded and a generator is configured.
+
+    // Looked up here rather than inside `writeAnswer`, for two reasons.
+    //
+    // `engine.lastQueryVector` is overwritten by the next question, and
+    // `writeAnswer` is deliberately not awaited — so a speculative retrieval
+    // fired by a voice partial could replace the vector before an async lookup
+    // read it, and the answer would be matched against the wrong question.
+    //
+    // And a stored answer needs no generator at all, so whether one exists has
+    // to be known before deciding what this message is waiting for.
+    const topPassage = res.citations[0]?.passageId;
+    const stored = answered && precomputed && topPassage !== undefined
+      ? precomputed.lookup(engine.lastQueryVector, topPassage)
+      : null;
+
     // `generating: true` holds the message in a waiting state rather than
     // painting the retrieved passage, which would flash on screen and then be
     // replaced by the real answer.
-    const willGenerate = answered && wiring.llm;
+    const willGenerate = answered && (!!stored || wiring.llm);
 
     handle.resolve(res, {
       userChunks: store?.activeChunks ?? 0,
@@ -491,7 +504,15 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
     // is the output rather than a reply in kind to a spoken question.
     const speakWhenReady = answered && speakOn;
 
-    if (willGenerate) {
+    if (stored) {
+      // Written offline for this exact question against this exact passage.
+      // Retrieval still ran and `res.totalMs` still reports it; what is skipped
+      // is the round trip. See `answer/precomputed.ts`.
+      handle.beginGeneration();
+      handle.streamDelta(stored.answer);
+      handle.endPrecomputed();
+      if (speakWhenReady) void speakAnswer(stored.answer, null, handle);
+    } else if (willGenerate) {
       void writeAnswer(q, res, handle, speakWhenReady);
     } else if (answered) {
       // No generator configured. The passage still contains the answer, but it
@@ -593,9 +614,7 @@ async function writeAnswer(
   if (speak) void speakAnswer(handle.currentAnswer(), null, handle);
 }
 
-// ---------------------------------------------------------------------------
-// speaking
-// ---------------------------------------------------------------------------
+// -- speaking ---------------------------------------------------------------
 
 /**
  * Speak an answer.
@@ -634,9 +653,7 @@ async function speakAnswer(
   }
 }
 
-// ---------------------------------------------------------------------------
-// voice input
-// ---------------------------------------------------------------------------
+// -- voice input ------------------------------------------------------------
 
 let stt: SttEngine | null = null;
 let sttKind: SttKind = "none";
@@ -766,9 +783,7 @@ async function stopMic(next: "thinking" | "idle" = "thinking"): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// events
-// ---------------------------------------------------------------------------
+// -- events -----------------------------------------------------------------
 
 $("ask-form").addEventListener("submit", (e) => {
   e.preventDefault();

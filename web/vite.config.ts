@@ -3,12 +3,12 @@ import type { ServerResponse } from "node:http";
 import { synthesizeStream, resolveProvider, SSE_HEADERS } from "../worker/src/synthesize";
 
 /**
- * Cross-origin isolation. This is what lets onnxruntime use SharedArrayBuffer
- * and run the embedding graph on multiple threads; without it transformers.js
+ * Cross-origin isolation, which is what lets onnxruntime use SharedArrayBuffer
+ * and run the embedding graph on several threads. Without it transformers.js
  * falls back to single-threaded WASM and the dominant cost in the query budget
  * roughly triples, with no error to explain why.
  *
- * Must stay in step with `public/_headers`, which is the production copy.
+ * Must stay in step with `public/_headers`, the production copy.
  * `credentialless` rather than `require-corp`: the model weights come from the
  * Hugging Face CDN and the fonts from Google, and neither sets CORP.
  */
@@ -20,35 +20,34 @@ const ISOLATION_HEADERS = {
 /**
  * The generator, served locally.
  *
- * In production `/synthesize` and `/health` are the Cloudflare Worker's, reached
- * through `VITE_WORKER_BASE`. In development that would mean the answer half of
- * a RAG system only works for someone who has deployed a Worker — so the whole
- * app would be demonstrable on a laptop *except* the part that answers, which
- * is precisely the part worth looking at.
+ * In production `/synthesize` and `/health` belong to the Cloudflare Worker,
+ * reached through `VITE_WORKER_BASE`. Without this, developing without a
+ * deployed Worker would leave the whole app demonstrable on a laptop except the
+ * part that answers.
  *
- * So the dev server mounts the same routes at the same paths. `VITE_WORKER_BASE`
- * stays empty locally, the client posts to a relative URL, and this answers it.
- * There is no second implementation to drift: the generator itself is imported
- * from the Worker's own source, so the prompt and the event protocol are
- * literally the same code in both places.
+ * So the dev server mounts the same routes at the same paths: leave
+ * `VITE_WORKER_BASE` empty, the client posts to a relative URL, and this answers
+ * it. There is no second implementation to drift — the generator is imported
+ * from the Worker's own source, so the prompt and the event protocol are the
+ * same code in both places.
  *
- * Keys are read from `web/.env.local` with `loadEnv`'s empty prefix, which
- * means they are *server-side* variables. None is `VITE_`-prefixed, so none is
- * inlined into the bundle — the browser can call this endpoint but cannot read
- * what authenticates it.
+ * Keys are read from `web/.env.local` with `loadEnv`'s empty prefix, making them
+ * server-side variables. None is `VITE_`-prefixed, so none is inlined into the
+ * bundle: the browser can call this endpoint but cannot read what authenticates
+ * it.
  */
 function generatorDevServer(env: Record<string, string>): Plugin {
-  // Resolved once at startup, by the same function the Worker uses, so "which
-  // generator am I talking to" has one answer and one place to change it.
+  // Resolved once at startup by the same function the Worker uses, so "which
+  // generator is this" has one answer and one place to change it.
   const provider = resolveProvider(env);
 
   const health: Connect.NextHandleFunction = (_req, res) => {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify({
       ok: true,
-      // Speech still needs the Worker: Sarvam and ElevenLabs keys are its, and
-      // one of the two exists to attach a header a browser cannot send. Saying
-      // they are available here would be a lie the UI would repeat.
+      // Speech still needs the Worker, which holds the Sarvam and ElevenLabs
+      // keys and exists partly to attach a header a browser cannot send.
+      // Claiming them here would be a claim the UI then repeats.
       stt: { sarvam: false },
       tts: { elevenlabs: false, sarvam: false },
       llm: !!provider,
@@ -84,16 +83,16 @@ function generatorDevServer(env: Record<string, string>): Plugin {
 
   return {
     name: "chehrag-generator-dev",
-    // Registered from `configureServer`/`configurePreviewServer` directly, so
-    // these land ahead of Vite's own middleware — otherwise the SPA fallback
-    // answers `/health` with index.html and the client decides, reasonably,
+    // Registered from `configureServer`/`configurePreviewServer` directly so
+    // they land ahead of Vite's own middleware. Otherwise the SPA fallback
+    // answers `/health` with index.html and the client concludes, reasonably,
     // that no generator exists.
     configureServer(server) {
       server.middlewares.use("/health", health);
       server.middlewares.use("/synthesize", synthesize);
     },
-    // `vite preview` serves the real build. Without this, the one command that
-    // tests what actually ships would be the one command with no generator.
+    // `vite preview` serves the real build, so without this the one command
+    // that tests what ships would be the one command with no generator.
     configurePreviewServer(server) {
       server.middlewares.use("/health", health);
       server.middlewares.use("/synthesize", synthesize);
@@ -109,9 +108,8 @@ async function pipeToNode(stream: ReadableStream<Uint8Array>, res: ServerRespons
       const { done, value } = await reader.read();
       if (done) break;
       res.write(value);
-      // Node coalesces small writes; an SSE frame that sits in a buffer is a
-      // frame the browser has not received, which is the one thing streaming
-      // exists to avoid.
+      // Node coalesces small writes, and an SSE frame sitting in a buffer is a
+      // frame the browser has not received.
       if (typeof (res as ServerResponse & { flush?: () => void }).flush === "function") {
         (res as ServerResponse & { flush: () => void }).flush();
       }
@@ -124,7 +122,7 @@ async function pipeToNode(stream: ReadableStream<Uint8Array>, res: ServerRespons
 }
 
 export default defineConfig(({ mode }) => {
-  // Empty prefix: load every variable, not just `VITE_`-prefixed ones. This is
+  // Empty prefix loads every variable, not just `VITE_`-prefixed ones. This is
   // config code running in Node, so it can hold the key; nothing here puts it
   // anywhere the client bundle can reach.
   const env = loadEnv(mode, process.cwd(), "");
@@ -133,17 +131,17 @@ export default defineConfig(({ mode }) => {
     plugins: [generatorDevServer(env)],
     build: {
       target: "es2022",
-      // Index blobs live in public/ and are copied verbatim. Never inline them —
-      // base64 in JS would inflate them ~33% and block parsing.
+      // Index blobs live in public/ and are copied verbatim. Never inline them:
+      // base64 in JS inflates them ~33% and blocks parsing.
       assetsInlineLimit: 0,
       chunkSizeWarningLimit: 2000,
     },
     server: { headers: ISOLATION_HEADERS },
-    // `vite preview` serves the real build, but it does not read `public/_headers`
-    // — that file is Cloudflare's. Without these the preview silently loses
-    // cross-origin isolation, threaded WASM falls back to single-threaded, and the
-    // embed stage measures ~3x slower than production for reasons that have
-    // nothing to do with the build being tested.
+    // `vite preview` serves the real build but does not read `public/_headers`,
+    // which is Cloudflare's. Without these the preview loses cross-origin
+    // isolation, threaded WASM falls back to single-threaded, and the embed
+    // stage measures ~3x slower than production for reasons that have nothing
+    // to do with the build being tested.
     preview: { headers: ISOLATION_HEADERS },
     optimizeDeps: { exclude: ["@huggingface/transformers"] },
   };

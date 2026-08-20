@@ -13,7 +13,9 @@
     "bench:multilingual": "tsx bench/multilingual.ts",
     "bench:gates": "tsx bench/gatetest.ts",
     "bench:deadline": "tsx bench/deadline.ts",
-    "bench:usersource": "tsx bench/usersource.ts"
+    "bench:usersource": "tsx bench/usersource.ts",
+    "precompute": "tsx bench/precompute.ts",
+    "bench:precomputed": "tsx bench/precomputed.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.7.6",

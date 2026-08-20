@@ -16,9 +16,8 @@
 </head>
 <body>
 <!-- `inert` from the first frame, lifted by curtain.ts once boot finishes.
-     Every control in here is wired during boot(); until then they are not
-     merely disabled, they are unwired, and letting someone tab into them
-     teaches them the app ignores them. -->
+     Every control in here is wired during boot(), so until then they are not
+     disabled but unwired, and tabbing into one would do nothing. -->
 <div class="app" id="app" data-stage="boot" inert>
 
   <!-- ─── top bar ─────────────────────────────────────────────────────── -->
@@ -65,8 +64,8 @@
       </button>
     </div>
 
-    <!-- add-a-source, inline rather than in a modal: adding sources is the
-         normal way to use this, not an exceptional action -->
+    <!-- Inline rather than in a modal: adding a source is the normal way to
+         use this, not an exceptional action. -->
     <div class="add-panel" id="add-panel" hidden>
       <div class="seg" role="tablist" aria-label="How to add a source">
         <button class="seg-btn is-on" data-mode="paste" role="tab" aria-selected="true">Paste</button>
@@ -111,9 +110,8 @@
     </div>
 
     <div class="rail-scroll">
-      <!-- The shipped corpus is a source like any other — including being
-           switchable, and starting off. Answers should come from what you
-           added, unless you decide otherwise. -->
+      <!-- The shipped corpus is a source like any other, including being
+           switchable. On by default; every answer names where it came from. -->
       <div class="src src-corpus" id="corpus-card" data-enabled="1">
         <span class="src-kind">Set</span>
         <div class="src-body">
@@ -139,9 +137,9 @@
   <!-- ─── conversation ────────────────────────────────────────────────── -->
   <main class="chat" id="chat">
     <div class="thread" id="thread">
-      <!-- One line and three questions. What the system is made of belongs in
-           the rail, which names the corpus, and on each answer, which carries
-           its own stopwatch and source — not in a paragraph on arrival. -->
+      <!-- One line and three questions. What the system is made of is in the
+           rail, which names the corpus, and on each answer, which carries its
+           own stopwatch and source. -->
       <div class="welcome" id="welcome">
         <h1 class="welcome-h">Ask out loud,<br />in fourteen languages.</h1>
         <div class="suggest" id="suggest" hidden>
@@ -158,10 +156,9 @@
       </div>
     </div>
 
-    <!-- ─── the stage ───────────────────────────────────────────────────
-         The lamp is the control, not the ornament. Speech is how this is
-         meant to be used, so the microphone is the largest thing in the
-         column and the keyboard is behind a button. -->
+    <!-- The stage. The lamp is the control rather than the ornament: speech is
+         how this is meant to be used, so the microphone is the largest thing in
+         the column and the keyboard is behind a button. -->
     <section class="stage" id="stage" data-typing="0">
       <button class="orb" id="orb" data-state="dormant" aria-label="Ask by voice" disabled>
         <span class="orb-ember" aria-hidden="true"></span>
@@ -201,7 +198,7 @@
         </button>
       </div>
 
-      <!-- The keyboard path. Present, complete, and second. -->
+      <!-- The keyboard path: present, complete, and second. -->
       <form class="composer" id="ask-form" autocomplete="off" hidden>
         <input class="composer-input" id="q" type="text" enterkeyhint="go"
                placeholder="Type a question…" spellcheck="false"
@@ -215,16 +212,15 @@
       </form>
 
       <!-- Which service will hear you and which will speak, once /health has
-           confirmed it. A status fact, not product copy — it is the only line
-           left here, and it earns its place by changing what you would do. -->
+           confirmed it. A status fact rather than product copy: it changes what
+           you would do. -->
       <p class="voice-note" id="voice-note"></p>
     </section>
   </main>
 
-  <!-- ─── the session ─────────────────────────────────────────────────
-       The lamp and the voice controls used to live here. They are the
-       product, so they moved into the conversation; what is left is the
-       instrument the brief asks to be visible. -->
+  <!-- The session. Latency across the questions asked so far, which is the one
+       thing worth keeping out of the conversation: it describes the session
+       rather than any single answer. -->
   <aside class="studio" id="studio" aria-label="This session">
     <div class="studio-scroll">
 
@@ -248,9 +244,8 @@
   <div class="scrim" id="scrim" hidden></div>
 </div>
 
-<!-- ─── first-run curtain ──────────────────────────────────────────────
-     Rendered from the initial HTML, before any module has parsed, so the
-     first frame a visitor sees is this rather than a page of dead controls.
+<!-- First-run curtain, rendered from the initial HTML before any module has
+     parsed, so the first frame is this rather than a page of dead controls.
      See `src/ui/curtain.ts` for why it is modal. -->
 <div class="curtain" id="curtain" role="dialog" aria-modal="true"
      aria-labelledby="curtain-h" data-state="loading">
@@ -299,17 +294,16 @@
   </div>
 </div>
 
-<!-- The curtain is up and `.app` is inert from the first frame, which means a
-     module that never runs at all — a chunk 404 after a bad deploy, a CSP that
-     blocks the import, a parse error — would leave a visitor staring at a bar
-     that never moves with no way past it. `curtain.ts` cannot report that: it
-     is the thing that did not load. So the net is inline, classic, and runs
-     before the module.
+<!-- The curtain is up and `.app` is inert from the first frame, so a module
+     that never runs at all — a chunk 404 after a bad deploy, a blocking CSP, a
+     parse error — would leave a visitor at a bar that never moves with no way
+     past it. `curtain.ts` cannot report that, being the thing that did not
+     load, so this net is inline, classic, and runs before the module.
 
-     It keys on a flag the Curtain constructor sets, not on a timer against the
-     download — a cold first visit on a slow connection is legitimately long,
-     and this must not fire on one. If the module is alive, its own stall
-     detector owns the "taking too long" case. -->
+     It keys on a flag the Curtain constructor sets rather than on a timer
+     against the download: a cold first visit on a slow connection is
+     legitimately long and must not trip it. If the module is alive, its own
+     stall detector owns the "taking too long" case. -->
 <script>
   setTimeout(function () {
     var c = document.getElementById("curtain");

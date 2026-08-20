@@ -601,10 +601,38 @@ npm install
 npm run calibrate              # fits the gate-2 threshold; writes public/thresholds.json
 npm run bench                  # P50 / P70 / P100 + retrieval quality
 npm run bench:deadline         # proves the cap holds under budget pressure
-npm run bench:gates            # 51 guardrail cases, incl. one per language
+npm run bench:gates            # 72 guardrail cases, incl. one per language
 npm run bench:usersource       # gate 2 on user documents — the split that governs the rescue
 npm run bench:multilingual     # 15 languages x 200 queries, cross-lingual hit@k
+npm run bench:precomputed      # the stored-answer store matches only its own question
 ```
+
+### Answering the corpus ahead of time
+
+The shipped corpus never changes, so every question it can answer has one answer
+that could have been written at build time. `npm run precompute` walks the
+answerable query set through the real pipeline, generates each answer once, and
+stores it in `web/public/answers/`. A question that matches one at query time
+skips the ~540 ms model round trip entirely; retrieval still runs and is still
+what the figure under the answer reports, and the message says **written ahead**
+rather than showing a generation time that never elapsed.
+
+```bash
+npm run precompute -- --limit 400     # a slice first; resumable, safe to re-run
+npm run precompute                    # the whole answerable set
+npm run bench:precomputed             # verify before shipping it
+```
+
+Parallelism is the obvious optimisation here and on a free Groq key it buys
+nothing: one request takes ~540 ms, so serial execution already offers ~111
+requests/minute, and the measured ceiling is **8,000 tokens/minute** — about 7
+requests. The limiter binds long before latency does, so `--workers 2` finishes
+no sooner than `--workers 1`. The scheduler meters both requests and tokens
+because the token budget is the one that actually binds, and `--workers`,
+`--rpm` and `--tpm` are there for a paid tier or a self-hosted `LLM_BASE_URL`,
+where round-trip latency is the constraint again. Measured throughput on the
+free tier is ~12.8 queries/minute, so the full 6,988-query set takes roughly
+nine hours — a one-time cost, checkpointed, and resumable after a Ctrl-C.
 
 ```bash
 # 4. turn on generated answers — free, ~15 seconds

@@ -55,9 +55,7 @@ function clamp(text: string): { text: string; truncated: boolean } {
   return { text: text.slice(0, MAX_CHARS), truncated: true };
 }
 
-// ---------------------------------------------------------------------------
-// paste
-// ---------------------------------------------------------------------------
+// -- paste ------------------------------------------------------------------
 
 export function ingestPaste(raw: string, title?: string): Extracted {
   const norm = normalise(raw);
@@ -80,9 +78,7 @@ function firstLineTitle(text: string): string {
   return t.length > 64 ? `${t.slice(0, 61)}…` : t;
 }
 
-// ---------------------------------------------------------------------------
-// files
-// ---------------------------------------------------------------------------
+// -- files ------------------------------------------------------------------
 
 const PLAIN_EXT = /\.(txt|md|markdown|csv|tsv|log|rst|org|tex|srt|vtt)$/i;
 const CODE_EXT = /\.(json|jsonl|ya?ml|toml|ini|xml|py|ts|tsx|js|jsx|go|rs|java|c|h|cpp|sh|sql)$/i;
@@ -287,9 +283,7 @@ function extractJson(raw: string): string {
   return out.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// urls
-// ---------------------------------------------------------------------------
+// -- urls -------------------------------------------------------------------
 
 /**
  * URL ingestion goes through the Worker, because the browser cannot fetch an

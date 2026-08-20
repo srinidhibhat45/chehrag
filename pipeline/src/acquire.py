@@ -49,8 +49,8 @@ def main() -> None:
     ap.add_argument("--lang", default="hin")
     ap.add_argument("--seed", type=int, default=20260819)
     # Share of sampled queries that are unanswerable. The raw file is 45%
-    # unanswerable; we keep a healthy slice but not so much that retrieval
-    # quality metrics get swamped by them.
+    # unanswerable; this keeps a useful slice without swamping the retrieval
+    # quality metrics.
     ap.add_argument("--unanswerable-share", type=float, default=0.30)
     args = ap.parse_args()
 

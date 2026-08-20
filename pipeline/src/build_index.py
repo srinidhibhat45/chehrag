@@ -8,28 +8,25 @@ Pipeline:
   5. int8-quantise PASSAGE vectors only, for final rescoring
   6. emit flat binary blobs + a JSON manifest
 
-Why one shared PCA and not one per strategy: the query is projected once and
-compared against all six indices. Six different projections would put each index
-in a different vector space and the query would only be valid in one of them --
-a silent correctness bug, not a quality tradeoff.
+One shared PCA rather than one per strategy: the query is projected once and
+compared against all six indices, so six projections would put each index in a
+different vector space and leave the query valid in only one of them. That is a
+silent correctness bug, not a quality tradeoff.
 
-Why PCA at all -- and this is the surprising part. PCA is not merely compression
-here; it is what makes binary quantisation WORK. Measured R@10 on 500 gold-labelled
-queries, brute force over 98,867 passages:
+PCA is not compression here, it is what makes binary quantisation work. Measured
+R@10 on 500 gold-labelled queries, brute force over 98,867 passages:
 
     fp32 384      (ceiling)        0.7580
     PCA-256 fp32  (var 0.90)       0.7440
     -> binary-256                  0.6040
-    binary-384, NO PCA             0.2280   <-- catastrophic
+    binary-384, NO PCA             0.2280
 
-Sign-bit quantisation of raw embedding dimensions is near-worthless because those
-dimensions are correlated and not zero-centred. PCA decorrelates and centres them,
-which is precisely what makes the sign bit informative. Dropping PCA to "keep more
-information" would destroy retrieval.
+Sign-bit quantisation of raw embedding dimensions is near-worthless because they
+are correlated and not zero-centred; PCA decorrelates and centres them, which is
+what makes the sign bit informative.
 
-Dim choice: 192 retained only 0.80 variance (R@10 0.718). 256 retains 0.90
-(R@10 0.744, within 1.4 points of the fp32 ceiling) and packs into exactly 8
-uint32 words. The extra 6.5 MB is marginal next to 77.8 MB of passage text.
+Dim: 192 retained only 0.80 variance (R@10 0.718). 256 retains 0.90 (R@10 0.744,
+within 1.4 points of the fp32 ceiling) and packs into exactly 8 uint32 words.
 """
 
 from __future__ import annotations

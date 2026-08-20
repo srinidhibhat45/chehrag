@@ -1,18 +1,18 @@
 /**
- * Benchmark harness — requirement 4 (P50 / P70 / P100) plus quality and
- * guardrail measurement.
+ * Latency and quality benchmark — P50 / P70 / P100, retrieval quality, and the
+ * guardrail split.
  *
- * Runs the SAME modules the browser runs (`assembleIndex` -> `RagEngine`), just
- * with blobs read from disk instead of fetched. Nothing here re-implements the
- * pipeline, so the numbers describe the shipped code.
+ * Runs the same modules the browser runs (`assembleIndex` -> `RagEngine`) with
+ * blobs read from disk instead of fetched, so the numbers describe shipped code
+ * rather than a re-implementation.
  *
- * Methodology, stated plainly because latency numbers are easy to flatter:
- *   - warmup queries run first and are DISCARDED. Un-warmed JS runs interpreted
- *     before the JIT promotes it; including that would measure the JIT, not us.
- *   - the answer cache is cleared before the measured run, and every measured
- *     query is distinct. A cached hit is ~0ms and would be dishonest.
+ * Methodology, since latency numbers are easy to flatter:
+ *   - warmup queries run first and are discarded. Un-warmed JS runs interpreted
+ *     before the JIT promotes it, so including it would measure the JIT.
+ *   - the answer cache is cleared before the measured run and every measured
+ *     query is distinct; a cached hit is ~0 ms.
  *   - index load is excluded and reported separately. It happens once per
- *     session; the requirement is about per-query cost.
+ *     session, and the budget is per query.
  *   - P100 is the max over the whole sample. No trimming, no outlier removal.
  */
 

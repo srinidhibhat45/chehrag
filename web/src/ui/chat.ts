@@ -54,6 +54,12 @@ export interface BotHandle {
   /** Generation finished and passed the grounding gate. */
   endGeneration(ms: number): void;
   /**
+   * The answer came from the precomputed store rather than from a model call.
+   * Labelled rather than timed: there is no generation figure to report, and
+   * showing one would describe a round trip that never happened.
+   */
+  endPrecomputed(): void;
+  /**
    * Generation did not produce a usable answer. `note` says why in the user's
    * terms, and the retrieved passage is shown instead, labelled as a quotation.
    */
@@ -175,6 +181,23 @@ export class Chat {
             "Time for the model to write the answer. Separate from the retrieval " +
             "figure beside it, which is the part of this system that carries the " +
             "200 ms guarantee.";
+          metaEl.insertBefore(chip, metaEl.querySelector(".meta-btn"));
+        }
+        addSpeakButton();
+        this.scroll();
+      },
+
+      endPrecomputed: () => {
+        streaming = false;
+        delete answerEl.dataset.state;
+        answerEl.textContent = generated.trim();
+        if (metaEl) {
+          const chip = el("span", "written ahead", "gen-ms");
+          chip.dataset.precomputed = "1";
+          chip.title =
+            "This answer was written offline for the shipped corpus and stored, " +
+            "so no model was called. The retrieval figure beside it is unchanged " +
+            "— that work still ran for this question.";
           metaEl.insertBefore(chip, metaEl.querySelector(".meta-btn"));
         }
         addSpeakButton();

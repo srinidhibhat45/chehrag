@@ -1,19 +1,18 @@
 /**
  * Cloudflare Worker — the only server-side component in the system.
  *
- * It exists for exactly two reasons, neither of which is latency:
+ * It exists for what a browser is not permitted to do, none of it latency:
  *
- *   1. Sarvam authenticates with an `api-subscription-key` HTTP header. Browsers
- *      cannot set custom headers on a WebSocket handshake, and shipping the key
- *      to the client would expose it. So the Worker terminates the browser
- *      socket and opens its own authenticated socket upstream.
+ *   1. Sarvam authenticates with an `api-subscription-key` header, and browsers
+ *      cannot set custom headers on a WebSocket handshake. The Worker
+ *      terminates the browser socket and opens an authenticated one upstream.
  *
- *   2. Optional LLM answer synthesis, which runs *after* the 200ms budget has
- *      already been met by the extractive path.
+ *   2. Answer synthesis, which runs after the extractive path has already met
+ *      the 200ms budget.
  *
- * NOTHING here is in the measured retrieval path. If this Worker is down, voice
- * input and LLM polish stop working; typed questions still answer in full, at
- * full speed, because retrieval is entirely client-side.
+ * Nothing here is in the measured retrieval path. With this Worker down, voice
+ * input and generated answers stop; typed questions still answer at full speed,
+ * because retrieval is entirely client-side.
  *
  * Free tier: 100k requests/day. Deploy with `wrangler deploy`.
  */
@@ -28,7 +27,7 @@ export interface Env {
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_VOICE_ID?: string;
   /* Answer generation. Any one of these is enough; see synthesize.ts for how
-     the provider is resolved and why Groq is the default. */
+     the provider is resolved. */
   GROQ_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   /** Point at any other OpenAI-compatible endpoint, including a local one. */
@@ -40,17 +39,15 @@ export interface Env {
 }
 
 /**
- * `https://`, not `wss://`, and that is not a typo.
+ * `https://`, not `wss://`, and not a typo.
  *
- * A Worker opens an upstream WebSocket by `fetch()`ing an **http(s)** URL with
+ * A Worker opens an upstream WebSocket by `fetch()`ing an http(s) URL with
  * `Upgrade: websocket` and reading `response.webSocket` off the 101. The
- * runtime's fetch has no `wss:` scheme at all — handed one it throws
- * `TypeError: Fetch API cannot load: wss://…` before a single packet moves.
+ * runtime's fetch has no `wss:` scheme at all, and throws
+ * `TypeError: Fetch API cannot load: wss://…` before a packet moves.
  *
- * The browser-facing URL is still `wss://…/stt/stream`; only this hop upstream
- * is spelled http. Streaming STT was dead in production for exactly this
- * reason, and silently: see the `return await` note in the router for why the
- * exception never reached a log the client could see.
+ * The browser-facing URL is still `wss://…/stt/stream`; only this upstream hop
+ * is spelled http.
  */
 const SARVAM_WS = "https://api.sarvam.ai/speech-to-text-realtime/ws";
 const SARVAM_REST = "https://api.sarvam.ai/speech-to-text";
@@ -63,12 +60,12 @@ const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 /**
  * CORS against a comma-separated allowlist.
  *
- * A list rather than a single value because Cloudflare Pages gives every
+ * A list rather than a single value, because Cloudflare Pages gives every
  * project two live origins — `chehrag.pages.dev` and a per-deploy
- * `<hash>.chehrag.pages.dev` — and a judge handed either one should not meet a
- * CORS error. Both are pinned explicitly; `*` stays available for local work
- * and is wrong in production, because `/fetch-url` makes outbound requests and
- * an open policy lets any site use this Worker as a proxy on your quota.
+ * `<hash>.chehrag.pages.dev` — and a visitor handed either should not meet a
+ * CORS error. `*` remains available for local work and is wrong in production:
+ * `/fetch-url` makes outbound requests, so an open policy lets any site use this
+ * Worker as a proxy on your quota.
  */
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   const allowed = env.ALLOWED_ORIGIN ?? "*";
@@ -76,7 +73,7 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   const ok = allowed === "*" || (!!origin && list.includes(origin));
   return {
     "Access-Control-Allow-Origin": ok ? (origin ?? "*") : (list[0] ?? "*"),
-    // The allowed origin now varies by request, so caches must key on it.
+    // The allowed origin varies by request, so caches must key on it.
     Vary: "Origin",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -93,12 +90,11 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(env, origin) });
     }
 
-    // `return await`, not `return`. A bare `return somePromise()` inside a
-    // try block hands the promise to the caller *before* it settles, so a
-    // rejection never reaches this catch: the runtime sees an uncaught
-    // exception and answers "error code: 1101" with no CORS headers and no
-    // log line the client can act on. That is exactly how a one-word bug in
-    // handleSttStream stayed invisible in production.
+    // `return await`, not `return`. A bare `return somePromise()` inside a try
+    // block hands the promise to the caller before it settles, so a rejection
+    // never reaches this catch: the runtime sees an uncaught exception and
+    // answers "error code: 1101" with no CORS headers and nothing the client
+    // can act on.
     try {
       if (url.pathname === "/stt/stream") return await handleSttStream(req, env);
       if (url.pathname === "/stt/batch") return await handleSttBatch(req, env, origin);
@@ -130,10 +126,9 @@ export default {
 };
 
 /**
- * WebSocket relay: browser <-> Worker <-> Sarvam.
- *
- * Messages pass through untouched in both directions. The Worker's only job is
- * attaching the auth header the browser cannot send.
+ * WebSocket relay: browser <-> Worker <-> Sarvam. Messages pass through
+ * untouched in both directions; the Worker's only job is attaching the auth
+ * header the browser cannot send.
  */
 async function handleSttStream(req: Request, env: Env): Promise<Response> {
   if (req.headers.get("Upgrade") !== "websocket") {
@@ -145,7 +140,7 @@ async function handleSttStream(req: Request, env: Env): Promise<Response> {
 
   const params = new URL(req.url).searchParams;
   const upstreamUrl = new URL(SARVAM_WS);
-  // Forward only known-safe params; never reflect arbitrary client input upstream.
+  // Allowlisted, so arbitrary client input is never reflected upstream.
   for (const k of ["language_code", "model", "input_audio_codec", "sample_rate"]) {
     const v = params.get(k);
     if (v) upstreamUrl.searchParams.set(k, v);
@@ -176,7 +171,7 @@ async function handleSttStream(req: Request, env: Env): Promise<Response> {
   });
 
   const closeBoth = (code?: number, reason?: string) => {
-    // 1005/1006 are "no status" codes and are illegal to send explicitly.
+    // 1005 and 1006 are "no status" codes and cannot be sent explicitly.
     const safe = code && code >= 1000 && code !== 1005 && code !== 1006 ? code : 1000;
     try { server.close(safe, reason); } catch { /* already closed */ }
     try { browser.close(safe, reason); } catch { /* already closed */ }
@@ -190,11 +185,9 @@ async function handleSttStream(req: Request, env: Env): Promise<Response> {
 }
 
 /**
- * Batch transcription fallback.
- *
- * The streaming path is preferred (partials drive speculative retrieval), but
- * corporate proxies and some mobile networks break long-lived WebSockets. This
- * keeps voice working when they do.
+ * Batch transcription fallback. Streaming is preferred, since partials drive
+ * speculative retrieval, but corporate proxies and some mobile networks break
+ * long-lived WebSockets.
  */
 async function handleSttBatch(req: Request, env: Env, origin: string | null): Promise<Response> {
   if (req.method !== "POST") {
@@ -211,7 +204,7 @@ async function handleSttBatch(req: Request, env: Env, origin: string | null): Pr
     return Response.json({ error: "missing_file" },
       { status: 400, headers: corsHeaders(env, origin) });
   }
-  // Cap upload size: a voice question is seconds, not minutes.
+  // A voice question is seconds of audio, not minutes.
   if (file.size > 8 * 1024 * 1024) {
     return Response.json({ error: "file_too_large" },
       { status: 413, headers: corsHeaders(env, origin) });
@@ -243,14 +236,12 @@ async function handleSttBatch(req: Request, env: Env, origin: string | null): Pr
  * Text to speech.
  *
  * Two providers behind one endpoint, chosen by the client from the language of
- * the answer — ElevenLabs where it has the language, Sarvam for the eight Indic
- * languages ElevenLabs does not cover. See `web/src/tts/speak.ts` for why that
- * split exists rather than a single provider.
+ * the answer: ElevenLabs where it has the language, Sarvam for the eight Indic
+ * languages it does not cover. See `web/src/tts/speak.ts` for the split.
  *
- * The response body is the audio itself, streamed straight through. Buffering
- * it here to inspect or re-encode would add the whole generation time to the
- * first byte, and this is the one place in the system where a user is waiting
- * on a network round trip in real time.
+ * The response body is the audio itself, streamed straight through. Buffering it
+ * here to inspect or re-encode would add the whole generation time to the first
+ * byte.
  */
 async function handleTts(req: Request, env: Env, origin: string | null): Promise<Response> {
   const headers = corsHeaders(env, origin);
@@ -261,8 +252,8 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
   const body = await req.json<{ text?: string; provider?: string; language?: string }>()
     .catch(() => ({} as { text?: string; provider?: string; language?: string }));
 
-  // Capped rather than rejected: a long answer should still be spoken, just
-  // truncated. Also bounds spend per request on both providers.
+  // Capped rather than rejected, so a long answer is still spoken. Also bounds
+  // spend per request on both providers.
   const text = (body.text ?? "").trim().slice(0, 900);
   if (!text) return Response.json({ error: "empty_text" }, { status: 400, headers });
 
@@ -270,8 +261,8 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
   const audioHeaders = {
     ...headers,
     "content-type": "audio/mpeg",
-    // Same text, same voice, same audio. Worth caching at the edge — repeat
-    // questions in a demo are the common case.
+    // Same text and voice give the same audio, and repeated questions are
+    // common, so this is worth caching at the edge.
     "cache-control": "public, max-age=3600",
   };
 
@@ -297,8 +288,8 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
       return Response.json({ error: "sarvam_tts_failed", status: res.status },
         { status: 502, headers });
     }
-    // Sarvam returns base64 WAV in JSON rather than an audio body, so this one
-    // genuinely has to be buffered — there is no stream to pass through.
+    // Sarvam returns base64 WAV in JSON rather than an audio body, so there is
+    // no stream to pass through and this one has to be buffered.
     const data = await res.json<{ audios?: string[] }>();
     const b64 = data.audios?.[0];
     if (!b64) return Response.json({ error: "sarvam_tts_empty" }, { status: 502, headers });
@@ -319,9 +310,10 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
     },
     body: JSON.stringify({
       text,
-      // flash v2.5 — ~75 ms model latency and 32 languages. The higher-quality
-      // multilingual_v2 costs roughly half a second more per request, which for
-      // a spoken reply is the difference between a conversation and a wait.
+      // flash v2.5: ~75 ms model latency across 32 languages. The
+      // higher-quality multilingual_v2 costs roughly half a second more per
+      // request, which for a spoken reply is the difference between a
+      // conversation and a wait.
       model_id: "eleven_flash_v2_5",
       language_code: body.language || undefined,
       voice_settings: { stability: 0.4, similarity_boost: 0.75, speed: 1.0 },
@@ -338,18 +330,11 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
 /**
  * Answer synthesis — the generation half of the RAG loop.
  *
- * This used to be described as "LLM polish", an optional rewrite layered over
- * an answer the browser had already produced. It is not optional any more, and
- * calling it polish was what let the product ship echoing its own sources back
- * at people. The browser retrieves; this generates; neither is the whole
- * system on its own.
+ * The browser retrieves and this generates; neither is the whole system alone.
+ * Not on the 200 ms clock: retrieval carries the latency guarantee and is
+ * measured and reported separately in the interface.
  *
- * It is still not on the 200 ms clock, and that has not changed: retrieval is
- * what carries the latency guarantee, it is measured separately, and it is
- * reported separately in the interface. What changed is that the interface no
- * longer presents a retrieved passage as though it were an answer.
- *
- * The response streams. See `synthesize.ts` for the prompt, the event protocol
+ * The response streams. See `synthesize.ts` for the prompt, the event protocol,
  * and why both live in a host-agnostic module.
  */
 async function handleSynthesize(req: Request, env: Env, origin: string | null): Promise<Response> {
@@ -361,8 +346,8 @@ async function handleSynthesize(req: Request, env: Env, origin: string | null): 
   const provider = resolveProvider(env);
   if (!provider) {
     // 503 rather than 500: nothing is broken, the capability was never
-    // configured. The client treats it as "no generator" and keeps its
-    // extractive answer rather than showing a failure.
+    // configured. The client keeps its extractive answer rather than showing a
+    // failure.
     return Response.json({ error: "llm_not_configured" }, { status: 503, headers: cors });
   }
 
@@ -388,24 +373,23 @@ async function handleSynthesize(req: Request, env: Env, origin: string | null): 
 }
 
 /**
- * Fetch a URL the user asked to add as a source, and return it as plain text.
+ * Fetch a URL the user added as a source, and return it as plain text.
  *
- * This exists because the browser cannot: reading the body of an arbitrary
- * cross-origin page is exactly what CORS forbids. It is not on any latency
- * path — a source is fetched once, when it is added.
+ * The browser cannot do this: reading the body of an arbitrary cross-origin page
+ * is what CORS forbids. Not on any latency path — a source is fetched once, when
+ * it is added.
  *
- * It is, however, the one endpoint that makes an outbound request to an address
- * the user supplies, which makes it the one place server-side request forgery
- * could get in. Guards, in order:
+ * It is the one endpoint that makes an outbound request to a user-supplied
+ * address, and therefore the one place SSRF could get in. Guards, in order:
  *
  *   - http/https only; no file:, data:, gopher: or blob:
  *   - literal private, loopback, link-local and metadata addresses refused
- *   - redirects followed manually, with every hop re-checked, because a public
+ *   - redirects followed manually with every hop re-checked, since a public
  *     hostname is free to redirect to 169.254.169.254
  *   - response capped, timed out, and content-type checked before reading
  *
- * The Worker holds two API keys. It must never become a way to read anything
- * that is only reachable from where it runs.
+ * The Worker holds API keys and must never become a way to read anything only
+ * reachable from where it runs.
  */
 const MAX_FETCH_BYTES = 6 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 12_000;
@@ -461,7 +445,7 @@ async function handleFetchUrl(req: Request, env: Env, origin: string | null): Pr
       if (target.protocol !== "http:" && target.protocol !== "https:") {
         return Response.json({ error: "unsupported_scheme" }, { status: 400, headers });
       }
-      // Re-checked on EVERY hop. Checking only the first URL is the classic
+      // Re-checked on every hop. Checking only the first URL is the classic
       // SSRF hole: a public host can redirect straight to link-local.
       if (isBlockedHost(target.hostname)) {
         return Response.json({ error: "blocked_host" }, { status: 400, headers });
@@ -471,8 +455,8 @@ async function handleFetchUrl(req: Request, env: Env, origin: string | null): Pr
         redirect: "manual",
         signal: ctrl.signal,
         headers: {
-          // Identify honestly and ask for text. Some sites serve a different
-          // (JS-only) page to unknown agents; that is their call to make.
+          // Identify plainly and ask for text. Some sites serve a JS-only page
+          // to unknown agents, which is their call to make.
           "User-Agent": "Chehrag/1.0 (+source ingestion; https://github.com/)",
           "Accept": "text/html,text/plain,application/xhtml+xml,text/markdown;q=0.9,*/*;q=0.1",
           "Accept-Language": "en,hi;q=0.8",
@@ -527,11 +511,9 @@ async function handleFetchUrl(req: Request, env: Env, origin: string | null): Pr
 }
 
 /**
- * Read a body with a hard byte ceiling.
- *
- * `content-length` is a claim, not a guarantee — it can be absent, wrong, or
- * deliberately understated. Streaming and counting is the only version that
- * actually bounds memory.
+ * Read a body with a hard byte ceiling. `content-length` is a claim rather than
+ * a guarantee — absent, wrong or deliberately understated — so streaming and
+ * counting is the only form that bounds memory.
  */
 async function readCapped(res: Response, max: number): Promise<string | null> {
   const reader = res.body?.getReader();
@@ -548,8 +530,8 @@ async function readCapped(res: Response, max: number): Promise<string | null> {
   const buf = new Uint8Array(total);
   let at = 0;
   for (const c of chunks) { buf.set(c, at); at += c.byteLength; }
-  // Non-fatal: a page with one bad byte should still be readable, and
-  // U+FFFD in the output is what `looksBinary` on the client keys off.
+  // Non-fatal, so a page with one bad byte is still readable. U+FFFD in the
+  // output is what `looksBinary` keys off on the client.
   return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(buf);
 }
 
@@ -563,10 +545,10 @@ function titleOf(html: string): string {
 /**
  * HTML to text, on the server.
  *
- * Workers have no DOMParser, so this is regex-based — acceptable because the
+ * Workers have no DOMParser, so this is regex-based. Acceptable because the
  * output is only ever embedded and displayed as text, never re-rendered as
  * markup. Order matters: script and style bodies must go before tags are
- * stripped, or their contents survive as "text".
+ * stripped, or their contents survive as text.
  */
 function stripHtml(html: string): string {
   return decodeEntities(

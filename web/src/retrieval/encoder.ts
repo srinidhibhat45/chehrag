@@ -50,9 +50,7 @@ export interface BatchEncoder extends Encoder {
   resumeBulk(): void;
 }
 
-// ---------------------------------------------------------------------------
-// in-thread
-// ---------------------------------------------------------------------------
+// -- in-thread --------------------------------------------------------------
 
 export class E5Encoder implements BatchEncoder {
   private extractor: ExtractFn | null = null;
@@ -97,9 +95,7 @@ export class E5Encoder implements BatchEncoder {
   resumeBulk(): void { /* nothing to schedule in-thread */ }
 }
 
-// ---------------------------------------------------------------------------
-// off-thread
-// ---------------------------------------------------------------------------
+// -- off-thread -------------------------------------------------------------
 
 interface Pending {
   resolve: (r: Res) => void;

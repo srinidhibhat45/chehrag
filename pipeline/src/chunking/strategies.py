@@ -1,24 +1,19 @@
 """Chunking strategies.
 
-Design note — why these strategies and not the textbook set
------------------------------------------------------------
-Measured corpus statistics drove this, not folklore. MS MARCO passages here are
-mean 317 / median 295 chars (~60-80 tokens). They are *already chunk-sized*.
+Chosen from measured corpus statistics. MS MARCO passages here are mean 317 /
+median 295 chars (~60-80 tokens), which is to say already chunk-sized: a
+512-token fixed-size splitter over a 295-char passage emits one chunk identical
+to its input, an expensive no-op.
 
-That kills the usual playbook. A 512-token fixed-size splitter over a 295-char
-passage emits exactly one chunk identical to the input: an expensive no-op. The
-brief warns against naive fixed-size chunking; on this corpus it is not merely
-naive, it is inert.
-
-So the axes that actually pay here are:
-  (a) going *finer* than a passage   -> sentence / sliding window
-  (b) going *coarser* than a passage -> document merge across a query group
-  (c) changing what gets embedded    -> contextual enrichment
-  (d) changing the matching function -> lexical BM25 alongside dense
+So the axes that pay on this corpus are:
+  (a) going finer than a passage   -> sentence / sliding window
+  (b) going coarser than a passage -> document merge across a query group
+  (c) changing what gets embedded  -> contextual enrichment
+  (d) changing the matching rule   -> lexical BM25 alongside dense
 
 Each strategy below states what it wins and what it costs. Strategy 5 (semantic)
-is included knowing it has little room on 3-sentence passages -- we measure its
-contribution rather than assume it, and report the result honestly.
+is included knowing it has little room on 3-sentence passages; its contribution
+is measured rather than assumed.
 """
 
 from __future__ import annotations
@@ -173,15 +168,13 @@ def strat_semantic(pid: str, text: str, meta: dict,
                    min_chars: int = 90, jaccard_cut: float = 0.08) -> list[Chunk]:
     """Split where adjacent sentences stop sharing vocabulary.
 
-    Uses token-Jaccard between neighbouring sentences as a topic-shift proxy
-    rather than a second embedding pass -- on 3-sentence passages an embedding
-    pass costs ~3x the build time to move a boundary that fusion would find
-    anyway.
+    Token-Jaccard between neighbouring sentences as a topic-shift proxy, rather
+    than a second embedding pass: on 3-sentence passages that costs ~3x the
+    build time to move a boundary fusion would find anyway.
 
-    HONEST EXPECTATION: low yield here. Median passage is ~3 sentences, so there
-    is often no boundary to find. Included because it is cheap and because the
-    eval should *demonstrate* its contribution rather than assume it. If it adds
-    nothing measurable we report that.
+    Expect low yield. The median passage is ~3 sentences, so there is often no
+    boundary to find. Included because it is cheap and because the eval measures
+    its contribution rather than assuming it.
     """
     spans = split_sentences(text)
     if len(spans) < 3:

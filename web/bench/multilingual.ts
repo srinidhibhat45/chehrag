@@ -12,9 +12,9 @@
  * to keep correct, and the two would drift.
  *
  * The refusal histogram is the part worth reading. Latency barely moves across
- * languages; what moves is *why* a language gets refused, and a per-reason
+ * languages; what moves is why a language gets refused, and a per-reason
  * breakdown is the only way to tell "retrieval could not find it" apart from
- * "a gate written for two scripts turned it away at the door".
+ * "a gate turned it away before retrieval ran".
  *
  *   npx tsx web/bench/multilingual.ts
  */

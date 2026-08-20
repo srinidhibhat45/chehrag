@@ -1,25 +1,19 @@
 /**
- * Does the 200ms cap actually hold?
+ * Does the 200 ms cap hold when the machine is not fast?
  *
- * Every other benchmark here measures how fast the system is on the machine it
- * was built on, which is the easy question — the answer is 7ms and the budget is
- * 200. This one measures the thing that is actually being claimed: that the cap
- * holds when the machine is *not* fast.
+ * Every other benchmark here measures speed on the machine this was built on,
+ * where the answer is ~7 ms against a 200 ms budget. Shrinking the budget
+ * instead exercises the same code path a 10x slower device hits at 200 ms:
+ * embedding eats most of it, `remaining()` comes back small, and `budgetPlan`
+ * has to choose a retrieval plan that fits.
  *
- * We cannot borrow a slow phone, so we shrink the budget instead. Squeezing the
- * pipeline into 20ms on this machine exercises exactly the code path a 10x
- * slower device hits at 200ms: embedding eats most of the budget, `remaining()`
- * comes back small, and `budgetPlan` has to choose a retrieval plan that fits.
- * If the cap is real, total latency tracks the budget down; if it is decorative,
- * latency stays flat and the overruns show up here.
- *
- * Two things are reported, because only reporting the first would be dishonest:
+ * Two things are reported, because the first alone would not mean much:
  *
  *   1. whether the deadline was respected  (the claim)
  *   2. what recall it cost to respect it   (the price)
  *
- * A cap that is met by returning nothing useful is not a cap worth having, so
- * hit@3 is measured at every budget against the full-budget result.
+ * A cap met by returning nothing useful is not worth having, so hit@3 is
+ * measured at every budget against the full-budget result.
  *
  *   npx tsx bench/deadline.ts
  */
@@ -64,13 +58,11 @@ function loadQueries(): string[] {
 }
 
 /**
- * The thresholds the deployed app actually uses.
+ * The thresholds the deployed app uses, not `DEFAULT_THRESHOLDS`.
  *
- * Not a detail: `DEFAULT_THRESHOLDS` is a deliberately conservative placeholder
- * (0.80 / 2 agreement) for the case where calibration has never been run, and
- * against it the corpus refuses nearly every query. An earlier version of this
- * benchmark used it and reported kept@3 over a sample of four — a number that
- * looked like a measurement and was noise. Load what ships.
+ * The defaults are a conservative placeholder for the case where calibration has
+ * never run, and against them the corpus refuses nearly every query — which
+ * would leave this measuring kept@3 over a sample of about four.
  */
 function fittedConfig() {
   try {

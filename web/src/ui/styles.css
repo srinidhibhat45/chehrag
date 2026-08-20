@@ -3,45 +3,36 @@
  *
  * The name is चिराग़, a small oil lamp, crossed with RAG. The interface is that
  * lamp in a cold, unlit room: graphite everywhere, and one warm light at the
- * foot of the conversation that everything else is arranged around. The lamp
- * is also the microphone — this is a thing you speak to, so the control you
- * speak into is the largest and the only lit object on the page, and the
- * keyboard is a button beside it.
+ * foot of the conversation that everything else is arranged around. The lamp is
+ * also the microphone, so the control you speak into is the largest and only lit
+ * object on the page, and the keyboard is a button beside it.
  *
- * Four rules the rest of this file obeys. They exist so later edits do not
- * drift back into the default look — the one with a gradient, a pill for every
- * noun, and a saturated accent on every button.
+ * Four rules the rest of this file obeys.
  *
- * 1. COLOUR IS LIGHT. If a thing is not a light source it has no hue. The
- *    flame appears in exactly three places — the lamp itself, the mark beside
- *    the wordmark, and the dot that signs an answer. Buttons, borders, focus
- *    rings, toggles and states are all drawn in ink and paper. One warning
- *    tone exists for a refusal or a blown budget and is used as text, never as
- *    a fill.
+ * 1. Colour is light. If a thing is not a light source it has no hue. The flame
+ *    appears in three places — the lamp, the mark beside the wordmark, and the
+ *    dot that signs an answer. Buttons, borders, focus rings, toggles and states
+ *    are drawn in ink and paper. One warning tone exists for a refusal or a
+ *    blown budget, used as text and never as a fill.
  *
- * 2. TWO SANS FACES, USED FOR DIFFERENT JOBS. Outfit is geometric and slightly
- *    architectural; it sets the wordmark and the display line and nothing else,
- *    so those read as built rather than typed. Inter does every word a person
- *    actually reads — answers, passages, labels, controls — because it was
- *    drawn for exactly that at exactly these sizes. Noto Sans Devanagari
- *    carries the Indic text at matching weights.
+ * 2. Two sans faces, for different jobs. Outfit is geometric and architectural;
+ *    it sets the wordmark and the display line and nothing else, so those read
+ *    as built rather than typed. Inter does every word a person actually reads —
+ *    answers, passages, labels, controls — having been drawn for that at these
+ *    sizes. Noto Sans Devanagari carries the Indic text at matching weights.
+ *    The display face takes negative tracking, which geometric sans needs at
+ *    large sizes and text sans never does. The monospace is reserved for figures
+ *    that must line up.
  *
- *    Sans at a given size reads larger and tighter than a serif did, so sizes
- *    come down slightly and line-heights go up; the display face gets negative
- *    tracking, which geometric sans needs at large sizes and text sans never
- *    does. The monospace is reserved for figures that must line up —
- *    milliseconds and counts — and nothing else.
- *
- * 3. HAIRLINES AND SPACE, NOT BOXES. One border weight, one radius, no pills,
- *    no shadows except on panes that genuinely float over the page. Panes are
+ * 3. Hairlines and space, not boxes. One border weight, one radius, no pills, no
+ *    shadows except on panes that genuinely float over the page. Panes are
  *    separated by a single rule on a shared ground rather than by fills.
  *
- * 4. NOTHING ON THE MAIN THREAD ANIMATES DURING A QUERY. The fireball is a
- *    WebGL shader running in a worker on its own canvas (see `fire.ts`). The
- *    only transitions here are hover and state changes, which by definition
- *    are not happening while a measured query is in flight. This is a latency
- *    project: an idle animation on the query thread would put its own frames
- *    inside the budget it exists to advertise.
+ * 4. Nothing on the main thread animates during a query. The fireball is a WebGL
+ *    shader running in a worker on its own canvas (see `fire.ts`), and the only
+ *    transitions here are hover and state changes, which cannot be in flight
+ *    while a measured query is. An idle animation on the query thread would put
+ *    its own frames inside the budget it exists to advertise.
  */
 
 :root {
@@ -153,13 +144,12 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 
-/* Two label styles. A tracked small-cap names a region of the page; a plain
-   one names a single control. Using the tracked form for both is what makes a
-   panel read as an instrument rather than a page.
+/* Two label styles. A tracked small-cap names a region of the page, a plain one
+   names a single control; using the tracked form for both makes a panel read as
+   an instrument rather than a page.
 
-   Tracking is .1em rather than the .13em the serif carried: Inter's uppercase
-   is already wider-set than a book face's, and the extra space at this size
-   turns a label into a logotype. */
+   Tracking is .1em: Inter's uppercase is already wide-set, and more space at
+   this size turns a label into a logotype. */
 .pane-title, .card-h {
   margin: 0;
   font: 600 11px/1 var(--sans);
@@ -386,10 +376,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .src-corpus { background: var(--raise); border-color: var(--line-2); }
 .src[data-status="error"] { border-color: rgb(var(--warn-rgb) / .45); }
 .src[data-enabled="0"] { opacity: .45; }
-/* The sample set starts off. That is its resting state, not something the user
-   switched off, so it must not wear the dimming that means "you disabled me" —
-   it has to read as available. Switched on, it gains the border every other
-   searched source has. */
+/* Off is this card's resting state rather than something the user did, so it
+   must not wear the dimming that means "you disabled me". Switched on, it gains
+   the border every other searched source has. */
 .src-corpus[data-enabled="0"] { opacity: 1; }
 .src-corpus[data-enabled="1"] { border-color: var(--ink-3); }
 
@@ -478,12 +467,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .thread > * { max-width: 700px; margin-inline: auto; padding-inline: 28px; }
 
-/* An empty room with a lamp in it. The paragraph that used to sit here
-   explained the corpus, the chunking, the stopwatch and the cross-lingual
-   retrieval — all true, all already stated where each one is checkable: the
-   rail names the corpus and counts its chunks, and every answer carries its
-   own stopwatch and source. On arrival it was a specification, and a
-   specification is not a greeting. */
+/* An empty room with a lamp in it. What the system is made of is stated where
+   each part is checkable — the rail names the corpus and counts its chunks, and
+   every answer carries its own stopwatch and source — so none of it is
+   explained here on arrival. */
 .welcome { padding-top: 6vh; padding-bottom: 10px; }
 .welcome-h {
   margin: 0 0 26px;
@@ -735,14 +722,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* -- attribution ----------------------------------------------------------- */
 /*
-   Under every answer, always visible. This is not a disclosure control that
-   happens to name a file — it is the second half of the answer, and hiding it
-   behind "3 sources" was what made an answer unverifiable at a glance. It is
-   *also* the control that opens the passages, which is the right place for that
-   affordance: you click the name of the document to see what the document said.
+   Under every answer, always visible: which document said so is the second half
+   of the answer, not a disclosure control that happens to name a file. It is
+   also the control that opens the passages, which is where that belongs — click
+   the name of the document to see what the document said.
 
-   Drawn as text with one underlined name, not as a chip. A pill here would make
-   the document look like a tag on the answer rather than its origin.
+   Drawn as text with one underlined name rather than as a chip. A pill would
+   make the document look like a tag on the answer rather than its origin.
 */
 
 .answer-source {
@@ -786,9 +772,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 @keyframes caret { 50% { opacity: 0; } }
 
-/* A retrieved passage standing in for an answer. Set as a quotation, because
-   that is what it is — the rule down the left says "this text is from the
-   document" in a way no amount of prose underneath it would. */
+/* A retrieved passage standing in for an answer, set as a quotation because
+   that is what it is: the rule down the left says so faster than prose would. */
 .answer-text[data-quoted="1"] {
   padding-left: 14px;
   border-left: 2px solid var(--line-2);
@@ -807,6 +792,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
+/* A stored answer has no duration to report, so it is named rather than timed.
+   Same weight as the figure it stands in for — it is a fact about the answer,
+   not a badge on it (rule 1: no fills, no colour). */
+.gen-ms[data-precomputed="1"] { font-family: var(--sans); font-size: 12px; }
 .speed-what { font: inherit; font-size: 11px; color: var(--ink-3); }
 .speed[data-over="1"] .speed-what { color: inherit; }
 
@@ -1008,8 +997,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .card-h { margin-bottom: 14px; }
 .card-note { margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
 
-/* Four figures in a three-column grid left the fourth stranded on a row of
-   its own. Two by two, which also survives the narrower pane. */
+/* Two by two rather than three across, so the fourth figure is not stranded on
+   a row of its own, and so it survives the narrower pane. */
 .stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); }
 .stat {
   display: grid; gap: 4px;
@@ -1059,8 +1048,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .curtain-panel { width: min(400px, 100%); text-align: center; }
 
-/* Not a second metaphor — this is the lamp before it is lit, and the bar
-   below is its charge. Only opacity and transform move (rule 4). */
+/* The lamp before it is lit, with the bar below as its charge. Only opacity and
+   transform move (rule 4). */
 .curtain-lamp {
   position: relative;
   display: block;
@@ -1178,8 +1167,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .curtain-retry { margin-top: 18px; }
 
-/* A failure has no progress to report, and `--warn` is a text colour here and
-   nowhere else (rule 1) — so the instrument goes away rather than turning red. */
+/* A failure has no progress to report, and `--warn` is a text colour and never
+   a fill (rule 1), so the instrument goes away rather than turning red. */
 .curtain[data-state="failed"] .curtain-bar,
 .curtain[data-state="failed"] .curtain-steps,
 .curtain[data-state="failed"] .curtain-why { display: none; }
@@ -1232,9 +1221,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .stage-btn { padding: 5px 7px; }
 }
 
-/* The lamp is the whole point, but not at the cost of a vestibular headache.
-   `orb.ts` also refuses to start any renderer under this query — this is the
-   belt to that braces. */
+/* Everything that moves here is decorative, so it can all stop. `orb.ts` also
+   refuses to start any renderer under this query; this backs that up in CSS. */
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
   .thread { scroll-behavior: auto; }
