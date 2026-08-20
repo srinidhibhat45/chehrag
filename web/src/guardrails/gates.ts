@@ -37,9 +37,7 @@ export interface GateResult {
 
 const PASS: GateResult = { pass: true };
 
-// ---------------------------------------------------------------------------
-// Gate 1 — input validation
-// ---------------------------------------------------------------------------
+// -- Gate 1 — input validation ----------------------------------------------
 
 /**
  * Instruction-override attempts, EN + HI.
@@ -217,9 +215,7 @@ function hasInterrogative(q: string): boolean {
   return !!script && script.hints.test(q);
 }
 
-// ---------------------------------------------------------------------------
-// Gate 2 — retrieval confidence
-// ---------------------------------------------------------------------------
+// -- Gate 2 — retrieval confidence ------------------------------------------
 
 export interface RetrievalSignals {
   /** Best fused score. */
@@ -311,9 +307,7 @@ export function gateRetrieval(
   return PASS;
 }
 
-// ---------------------------------------------------------------------------
-// Gate 3 — grounding
-// ---------------------------------------------------------------------------
+// -- Gate 3 — grounding -----------------------------------------------------
 
 /**
  * Fraction of the answer's content tokens that appear in the retrieved context.
@@ -356,7 +350,8 @@ function specifics(text: string): Set<string> {
   for (const sentence of text.split(/(?<=[।.!?])\s+/)) {
     const words = sentence.trim().split(/\s+/).filter(Boolean);
     words.forEach((w, i) => {
-      const bare = w.replace(/[^\p{L}\p{N}]/gu, "");
+      // `\p{M}` keeps Indic matras attached to their base letter; see tokens.ts.
+      const bare = w.replace(/[^\p{L}\p{N}\p{M}]/gu, "");
       if (bare.length < 2) return;
       if (/\p{N}/u.test(bare)) { out.add(bare.toLowerCase()); return; }
       // Not the first word of the sentence, and starts with a capital.
@@ -404,7 +399,8 @@ export function gateGrounding(
     dominantScript(joined) !== "unknown";
 
   const ctxRaw = new Set<string>();
-  for (const w of normaliseDigits(joined).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/)) {
+  const flat = normaliseDigits(joined).toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s]/gu, " ");
+  for (const w of flat.split(/\s+/)) {
     if (w) ctxRaw.add(w);
   }
 

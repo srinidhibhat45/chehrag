@@ -25,6 +25,7 @@ import {
   gateInput, gateRetrieval, gateGrounding, DEFAULT_THRESHOLDS,
   type ConfidenceThresholds, type GateResult, type Refusal, type RetrievalSignals,
 } from "../guardrails/gates";
+import { foldRomanisedHindi } from "../retrieval/translit";
 
 export interface Encoder {
   /** Returns a raw 384-d L2-normalised embedding for a query string. */
@@ -195,6 +196,15 @@ export class RagEngine {
   /** User sources are attached after boot, once the encoder is up. */
   attachSources(store: SourceStore): void { this.store = store; }
 
+  /**
+   * The projected query vector from the most recent `ask`.
+   *
+   * Exposed so the precomputed-answer store can match on it instead of
+   * embedding the question a second time. Valid only until the next call, and
+   * only when that call reached the embed stage.
+   */
+  get lastQueryVector(): Float32Array { return this.queryVec; }
+
   get corpusOn(): boolean { return this.corpusEnabled; }
 
   /** Turning the corpus on or off changes what the right answer is. */
@@ -271,6 +281,8 @@ export class RagEngine {
     let refusal: GateResult | null = null;
     /** Original length, when the query had to be clamped before embedding. */
     let truncatedFrom = 0;
+    /** Set when romanised Hindi was folded to Devanagari before embedding. */
+    let folded = "";
     let fused: FusedHit[] = [];
     let citations: Citation[] = [];
     let confidence = 0;
@@ -308,7 +320,13 @@ export class RagEngine {
           if (clamped.length !== q.length) {
             truncatedFrom = q.length;
           }
-          return clamped;
+          // Romanised Hindi is folded to Devanagari before it reaches the
+          // encoder. The corpus is Devanagari, and the folded form is what the
+          // embedder and the lexical-overlap signal can both read; see
+          // `retrieval/translit.ts`. A no-op for every other kind of query.
+          const hindi = foldRomanisedHindi(clamped);
+          if (hindi !== clamped) folded = hindi;
+          return hindi;
         },
       })
       // ---- embed ---------------------------------------------------------
@@ -502,7 +520,10 @@ export class RagEngine {
     } else {
       out = {
         status: "answered",
-        answer: extractAnswer(query, citations[0].text),
+        // The folded query where there is one: picking which sentence of a
+        // Devanagari passage answers the question is a lexical-overlap
+        // comparison, and a romanised query shares no tokens with either.
+        answer: extractAnswer(folded || query, citations[0].text),
         citations,
         confidence,
         telemetry: run.telemetry,

@@ -1,10 +1,13 @@
 /**
- * Guardrail gate tests (requirement 6).
+ * Guardrail gate tests, plus the tokenisation and romanised-Hindi handling the
+ * gates depend on.
  *
- * Gate 1 and gate 3 are deterministic and index-independent, so they are tested
- * directly. Gate 2 is data-driven and is measured by bench/calibrate.ts instead.
+ * Gates 1 and 3 are deterministic and index-independent, so they are tested
+ * directly. Gate 2 is data-driven and is measured by `bench/calibrate.ts`.
  */
 import { gateInput, gateGrounding, groundingScore, filterUngroundedSentences } from "../src/guardrails/gates";
+import { contentTokens } from "../src/retrieval/tokens";
+import { foldRomanisedHindi, isRomanisedHindi } from "../src/retrieval/translit";
 
 type Case = [string, string | null];   // [input, expected refusal reason or null to pass]
 
@@ -196,6 +199,77 @@ for (const [answer, ctx, expected, label] of XLING) {
   const ok = got === expected;
   ok ? pass++ : fail++;
   console.log(`${ok ? "  ok  " : "  FAIL"} ${expected ? "passes" : "REJECTED"}: ${label}`);
+}
+
+console.log("\n" + "=".repeat(70));
+console.log("TOKENISATION — Indic combining marks");
+console.log("=".repeat(70));
+
+/*
+ * Indic vowel signs are Unicode marks, not letters, so a `\p{L}`-only character
+ * class cuts every word at its first matra. `निगम क्या है` reduced to the single
+ * token `गम`, and `भारत की राजधानी` to `रत` + `जध`. Nothing errored: both sides
+ * of an overlap comparison were mangled identically, so the score stayed
+ * plausible while measuring something else, and the Hindi stoplist matched
+ * nothing at all because its entries were being shredded before comparison.
+ */
+const TOKENS: Array<[string, string[]]> = [
+  ["निगम क्या है", ["निगम"]],                        // क्या / है are stopwords
+  ["भारत की राजधानी क्या है", ["भारत", "राजधानी"]],
+  ["कोरोनावायरस", ["कोरोनावायरस"]],
+  ["তথ্য কী", ["তথ্য", "কী"]],                        // Bengali
+  ["கார்பரேஷன் என்றால் என்ன", ["கார்பரேஷன்", "என்றால்", "என்ன"]],  // Tamil
+  ["what is the name", ["name"]],                     // English unaffected
+];
+
+for (const [input, expected] of TOKENS) {
+  const got = [...contentTokens(input)];
+  const ok = got.length === expected.length && got.every((w, i) => w === expected[i]);
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${JSON.stringify(input).padEnd(40)} -> ` +
+              `${JSON.stringify(got)}${ok ? "" : ` expected ${JSON.stringify(expected)}`}`);
+}
+
+console.log("\n" + "=".repeat(70));
+console.log("ROMANISED HINDI — folded to Devanagari before embedding");
+console.log("=".repeat(70));
+
+/*
+ * e5 has no representation for Latin-script Hindi, so `kya` and `hai` are
+ * neither Hindi nor English to it and drag the query vector off the region its
+ * content word points at. Measured against the shipped corpus and threshold:
+ *
+ *     Corporation kya hai        0.3846 -> 0.5984   refused -> answered
+ *     corporation ka matlab...   0.3315 -> 0.5571   refused -> answered
+ *     bone scan kya hota hai     0.3868 -> 0.5763   refused -> answered
+ *
+ * What must not happen is an English or Devanagari query being rewritten, so
+ * both directions are asserted.
+ */
+const FOLD: Array<[string, boolean, string | null]> = [
+  ["Corporation kya hai", true, "corporation क्या है"],
+  ["corporation ka matlab kya hai", true, "corporation का मतलब क्या है"],
+  ["bone scan kya hota hai", true, "bone scan क्या होता है"],
+  ["photosynthesis kaise hota hai", true, "photosynthesis कैसे होता है"],
+  // request scaffolding is dropped rather than transliterated: "मुझे … बताइए"
+  // embeds toward first-person narrative passages.
+  ["mujhe corporation ke bare mein bataiye", true, "corporation के बारे में"],
+
+  // must be left exactly as written
+  ["what is a corporation", false, null],
+  ["who is the president of the united states", false, null],
+  ["how much does he pay me for the car", false, null],   // `he` / `me` are English
+  ["निगम क्या है", false, null],
+  ["what is a bare metal server", false, null],           // `bare` is English here
+];
+
+for (const [input, shouldFold, expected] of FOLD) {
+  const detected = isRomanisedHindi(input);
+  const got = foldRomanisedHindi(input);
+  const ok = detected === shouldFold && (shouldFold ? got === expected : got === input);
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${JSON.stringify(input).padEnd(44)} -> ` +
+              `${JSON.stringify(got)}${ok ? "" : ` expected ${JSON.stringify(expected ?? input)}`}`);
 }
 
 console.log("\n" + "=".repeat(70));

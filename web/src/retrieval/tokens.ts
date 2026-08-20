@@ -68,11 +68,23 @@ const HI_STOP = new Set([
 const HAS_LATIN = /[a-z]/i;
 const HAS_DEVANAGARI = /[ऀ-ॿ]/;
 
-/** Split on anything that is not a letter or a digit, in any script. */
+/**
+ * Split on anything that is not part of a word, in any script.
+ *
+ * `\p{M}` is not optional. Indic vowel signs, virama, nukta and anusvara are
+ * combining marks rather than letters, so a `\p{L}`-only class cuts every word
+ * at its first matra: `भारत` becomes `र` + `त`, and `निगम क्या है` reduces to
+ * the single token `गम`. Every Indic script is affected, and the damage is
+ * silent — both sides of an overlap comparison are mangled the same way, so the
+ * score stays plausible while measuring the wrong thing. ZWNJ and ZWJ are kept
+ * for the same reason: Devanagari uses them to control conjunct formation.
+ */
+const WORD_BREAK = /[^\p{L}\p{N}\p{M}‌‍\s]/gu;
+
 function rawTokens(s: string): string[] {
   return s
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(WORD_BREAK, " ")
     .split(/\s+/)
     .filter((w) => w.length > 1);
 }

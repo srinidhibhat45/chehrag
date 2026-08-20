@@ -129,9 +129,7 @@ function hardWrap(s: string, limit: number): string[] {
   return parts.filter(Boolean);
 }
 
-// ---------------------------------------------------------------------------
-// the six strategies
-// ---------------------------------------------------------------------------
+// -- the six strategies -----------------------------------------------------
 
 const SENTENCE_MIN_CHARS = 45;
 const SLIDING_WINDOW = 2;
@@ -219,7 +217,8 @@ function uniq(xs: string[]): string[] {
  */
 function semanticGroups(sents: string[], threshold = 0.12): string[][] {
   const toks = sents.map((s) => new Set(
-    s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2),
+    // `\p{M}` keeps Indic matras attached to their base letter; see tokens.ts.
+    s.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2),
   ));
   const groups: string[][] = [];
   let cur = [sents[0]];
