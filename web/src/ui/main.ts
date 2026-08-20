@@ -707,6 +707,13 @@ async function toggleMic(): Promise<void> {
         live.textContent = e.text;
         if (e.language) lastHeardLanguage = e.language;
         void stopMic().then(() => ask(e.text, { voice: true }));
+      } else if (e.type === "notice") {
+        // The engine changed how it is working and is still working. Say so
+        // and keep listening — tearing it down here is what turned a working
+        // batch fallback into a null dereference.
+        live.dataset.partial = "1";
+        live.textContent = e.message;
+        orb.set("listening", "Listening", "tap the lamp again when you're done");
       } else if (e.type === "error") {
         live.dataset.error = "1";
         live.textContent = e.message;
@@ -726,15 +733,23 @@ async function toggleMic(): Promise<void> {
     live.textContent = "No speech recogniser available in this browser.";
     return;
   }
-  stt = picked.engine;
+  // Held locally as well as in `stt`, because `start()` is a suspension point
+  // and this engine can be torn down inside it: a recogniser may report an
+  // error, or a final transcript, before it reports that it started, and
+  // `stopMic` nulls `stt` from that callback. Reading the module-level
+  // variable after the await then dereferences null, and the useful message
+  // the engine had already put on screen is overwritten by the wreckage.
+  const sttEngine = picked.engine;
+  stt = sttEngine;
   sttKind = picked.kind;
 
   try {
-    await stt.start();
+    await sttEngine.start();
+    if (stt !== sttEngine) return;   // superseded or stopped while starting
     recording = true;
     // The fire pulses with the voice. Without a stream (permission granted but
     // Web Audio unavailable) it simply stays lit without the pulse.
-    const stream = stt.micStream;
+    const stream = sttEngine.micStream;
     if (stream) orb.listenTo(stream);
     if (sttKind === "browser") {
       live.textContent = "Listening… (browser recogniser — Sarvam key not configured)";

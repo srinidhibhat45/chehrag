@@ -39,7 +39,20 @@ export interface Env {
   ALLOWED_ORIGIN?: string;
 }
 
-const SARVAM_WS = "wss://api.sarvam.ai/speech-to-text-realtime/ws";
+/**
+ * `https://`, not `wss://`, and that is not a typo.
+ *
+ * A Worker opens an upstream WebSocket by `fetch()`ing an **http(s)** URL with
+ * `Upgrade: websocket` and reading `response.webSocket` off the 101. The
+ * runtime's fetch has no `wss:` scheme at all — handed one it throws
+ * `TypeError: Fetch API cannot load: wss://…` before a single packet moves.
+ *
+ * The browser-facing URL is still `wss://…/stt/stream`; only this hop upstream
+ * is spelled http. Streaming STT was dead in production for exactly this
+ * reason, and silently: see the `return await` note in the router for why the
+ * exception never reached a log the client could see.
+ */
+const SARVAM_WS = "https://api.sarvam.ai/speech-to-text-realtime/ws";
 const SARVAM_REST = "https://api.sarvam.ai/speech-to-text";
 const SARVAM_TTS = "https://api.sarvam.ai/text-to-speech";
 const ELEVEN_TTS = "https://api.elevenlabs.io/v1/text-to-speech";
@@ -80,12 +93,18 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(env, origin) });
     }
 
+    // `return await`, not `return`. A bare `return somePromise()` inside a
+    // try block hands the promise to the caller *before* it settles, so a
+    // rejection never reaches this catch: the runtime sees an uncaught
+    // exception and answers "error code: 1101" with no CORS headers and no
+    // log line the client can act on. That is exactly how a one-word bug in
+    // handleSttStream stayed invisible in production.
     try {
-      if (url.pathname === "/stt/stream") return handleSttStream(req, env);
-      if (url.pathname === "/stt/batch") return handleSttBatch(req, env, origin);
-      if (url.pathname === "/tts") return handleTts(req, env, origin);
-      if (url.pathname === "/synthesize") return handleSynthesize(req, env, origin);
-      if (url.pathname === "/fetch-url") return handleFetchUrl(req, env, origin);
+      if (url.pathname === "/stt/stream") return await handleSttStream(req, env);
+      if (url.pathname === "/stt/batch") return await handleSttBatch(req, env, origin);
+      if (url.pathname === "/tts") return await handleTts(req, env, origin);
+      if (url.pathname === "/synthesize") return await handleSynthesize(req, env, origin);
+      if (url.pathname === "/fetch-url") return await handleFetchUrl(req, env, origin);
       if (url.pathname === "/health") {
         return Response.json(
           {

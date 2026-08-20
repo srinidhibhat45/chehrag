@@ -19,6 +19,9 @@ export type SttEvent =
   | { type: "final"; text: string; language?: string }
   | { type: "speech_start" }
   | { type: "speech_end" }
+  /** Something changed and the engine is still working. Never a teardown. */
+  | { type: "notice"; message: string }
+  /** The engine cannot continue. The listener is expected to stop it. */
   | { type: "error"; message: string }
   | { type: "closed" };
 
@@ -78,9 +81,17 @@ export class SarvamStt {
       this.mode = "stream";
     } catch (err) {
       // WebSocket blocked or upstream refused — degrade rather than fail.
+      //
+      // A `notice`, emphatically not an `error`. This is the fallback doing its
+      // job: the microphone is open, batch capture is about to start, and the
+      // only thing lost is partial transcripts. Reporting it as an error made
+      // the UI tear the engine down mid-`start()` — destroying the very
+      // fallback this branch had just set up, and surfacing the wreckage as
+      // "Cannot read properties of null (reading 'micStream')" instead of the
+      // message that says what actually happened.
       this.opts.onEvent({
-        type: "error",
-        message: `streaming unavailable (${err instanceof Error ? err.message : err}); using batch mode`,
+        type: "notice",
+        message: `Live transcription unavailable (${err instanceof Error ? err.message : err}) — recording, and transcribing when you stop.`,
       });
       this.startBatch();
       this.mode = "batch";
@@ -145,7 +156,11 @@ export class SarvamStt {
   }
 
   private startBatch(): void {
-    const rec = new MediaRecorder(this.stream!, { mimeType: "audio/webm" });
+    // `stop()` may already have run and released the tracks — a listener can
+    // call it from inside the notice above. Without this the constructor
+    // throws on a null stream and takes the whole `start()` down with it.
+    if (!this.stream) return;
+    const rec = new MediaRecorder(this.stream, { mimeType: "audio/webm" });
     this.recorder = rec;
     this.batchChunks = [];
     rec.ondataavailable = (e) => { if (e.data.size) this.batchChunks.push(e.data); };
