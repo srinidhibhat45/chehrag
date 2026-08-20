@@ -1,0 +1,17 @@
+[project]
+name = "voicerag-pipeline"
+version = "0.1.0"
+description = "Offline index builder for the voice RAG system"
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=0.34",
+    "pyarrow>=17",
+    "numpy>=2.1",
+    "onnxruntime>=1.20",
+    "tokenizers>=0.21",
+    "tqdm>=4.66",
+    "orjson>=3.10",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,36 @@
+# Cloudflare Pages headers.
+#
+# The first block is load-bearing, not hygiene. Cross-origin isolation is what
+# lets onnxruntime use SharedArrayBuffer and run the embedding graph on multiple
+# threads; without it transformers.js silently falls back to single-threaded
+# WASM and the embed stage — the dominant cost in the query budget — roughly
+# triples. The app still works, it is just three times slower for no visible
+# reason, which is the worst kind of regression.
+#
+# COEP is `credentialless` rather than `require-corp` deliberately: the model
+# weights come from the Hugging Face CDN and the fonts from Google, neither of
+# which sets CORP headers. `require-corp` would block both.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: SAMEORIGIN
+
+# Index blobs are immutable *for a given build*, and the loader appends
+# `?v=<manifest.builtAt>` to every one of them. Rebuilding the index changes
+# builtAt, which changes every URL, which busts this cache automatically.
+/index/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The exception: the manifest is what carries builtAt, so it can never be the
+# thing that goes stale.
+/index/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Vite content-hashes these filenames, so they are safe to pin forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate

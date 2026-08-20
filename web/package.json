@@ -1,0 +1,27 @@
+{
+  "name": "chehrag-web",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "bench": "tsx bench/run.ts",
+    "calibrate": "tsx bench/calibrate.ts",
+    "typecheck": "tsc --noEmit",
+    "bench:multilingual": "tsx bench/multilingual.ts",
+    "bench:gates": "tsx bench/gatetest.ts",
+    "bench:deadline": "tsx bench/deadline.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.6",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.2.108"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.7",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.14"
+  }
+}

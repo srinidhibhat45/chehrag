@@ -1,0 +1,32 @@
+name = "chehrag-worker"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# The only server-side component, and nothing it does is on the latency path.
+# It exists for three things a browser is not permitted to do:
+#
+#   /stt/stream, /stt/batch   attach Sarvam's `api-subscription-key` header
+#                             (browsers cannot set headers on a WS handshake)
+#   /tts                      hold the ElevenLabs and Sarvam keys off the client
+#   /fetch-url                read the body of a cross-origin page
+#   /synthesize               hold the Anthropic key off the client
+#
+# Secrets are set out-of-band, never committed:
+#   wrangler secret put SARVAM_API_KEY        speech in, and speech out for the
+#                                             8 Indic languages ElevenLabs lacks
+#   wrangler secret put ELEVENLABS_API_KEY    spoken answers (English/Hindi/Tamil)
+#   wrangler secret put ANTHROPIC_API_KEY     (optional — LLM rewrite only)
+#
+# Optional: pin a specific ElevenLabs voice. Defaults to a stock voice so a
+# fresh deploy needs no voice setup at all.
+#   wrangler secret put ELEVENLABS_VOICE_ID
+
+[vars]
+# Set this to the deployed Pages origin once it exists. "*" is fine for local
+# development and wrong for production: /fetch-url makes outbound requests, so
+# an open CORS policy lets any site use your Worker as a fetch proxy on your
+# quota.
+ALLOWED_ORIGIN = "*"
+
+[observability]
+enabled = true

@@ -1,0 +1,36 @@
+node_modules/
+dist/
+.wrangler/
+.DS_Store
+
+# secrets — Worker keys are set with `wrangler secret put`, never committed
+.env
+.env.local
+web/.env
+web/.env.local
+worker/.dev.vars
+
+# Pipeline inputs and intermediates. All of it is regenerable, and none of it
+# is needed to build, run or deploy the app — `web/public/index/` is the only
+# pipeline output the app reads, and that one IS committed (see below).
+#
+# Comments live on their own lines here. git does NOT strip a trailing comment
+# from a pattern: `pipeline/data/model/   # 578 MB` is one literal pattern that
+# matches nothing, and the 448 MB weights it was meant to exclude get staged.
+pipeline/.venv/
+pipeline/data/raw/
+# 578 MB of ONNX weights, re-downloaded by src/acquire.py
+pipeline/data/model/
+pipeline/data/vectors/
+pipeline/data/chunks/
+# 111 MB — over GitHub's 100 MB per-file hard limit, so it cannot be pushed
+pipeline/data/subset/
+pipeline/data/*.log
+**/__pycache__/
+
+# web/public/index/ is deliberately NOT ignored. It is ~131 MB of index blobs,
+# which is a lot to keep in git — but it is the only thing standing between a
+# fresh clone and a working deploy. Rebuilding it needs the Python pipeline,
+# the 111 MB corpus subset and the 578 MB model, none of which are here. The
+# largest single file is 24.1 MiB, under both GitHub's 100 MB limit and
+# Cloudflare Pages' 25 MiB one.

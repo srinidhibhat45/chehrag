@@ -1,0 +1,939 @@
+/**
+ * Chehrag — design rules.
+ *
+ * The name is चिराग़, a small oil lamp, crossed with RAG. The interface is that
+ * lamp in a cold, unlit room: graphite everywhere, and one warm light on the
+ * right that everything else is arranged around.
+ *
+ * Four rules the rest of this file obeys. They exist so later edits do not
+ * drift back into the default look — the one with a gradient, a pill for every
+ * noun, and a saturated accent on every button.
+ *
+ * 1. COLOUR IS LIGHT. If a thing is not a light source it has no hue. The
+ *    flame appears in exactly three places — the lamp itself, the mark beside
+ *    the wordmark, and the dot that signs an answer. Buttons, borders, focus
+ *    rings, toggles and states are all drawn in ink and paper. One warning
+ *    tone exists for a refusal or a blown budget and is used as text, never as
+ *    a fill.
+ *
+ * 2. SERIF THROUGHOUT. What this app puts on screen is prose retrieved from
+ *    documents, and prose belongs in a book face. Instrument Serif sets the
+ *    display line, Newsreader does the reading and the interface, Noto Serif
+ *    Devanagari carries the Indic text. The monospace is reserved for figures
+ *    that must line up — milliseconds and counts — and nothing else. No label
+ *    is set in a small uppercase monospace; that is how an instrument panel
+ *    looks, not a product.
+ *
+ * 3. HAIRLINES AND SPACE, NOT BOXES. One border weight, one radius, no pills,
+ *    no shadows except on panes that genuinely float over the page. Panes are
+ *    separated by a single rule on a shared ground rather than by fills.
+ *
+ * 4. NOTHING ON THE MAIN THREAD ANIMATES DURING A QUERY. The fireball is a
+ *    WebGL shader running in a worker on its own canvas (see `fire.ts`). The
+ *    only transitions here are hover and state changes, which by definition
+ *    are not happening while a measured query is in flight. This is a latency
+ *    project: an idle animation on the query thread would put its own frames
+ *    inside the budget it exists to advertise.
+ */
+
+:root {
+  /* the room — cool graphite, deliberately not warm. The one warm thing on
+     the page is the lamp, and warmth reads as light only against cold. */
+  --ground:    #101113;
+  --ground-2:  #16181b;
+  --raise:     #191b1e;
+  --raise-2:   #202327;
+  --line:      #24272b;
+  --line-2:    #33373d;
+
+  /* ink */
+  --ink:       #eceef1;
+  --ink-2:     #9ba1a9;
+  --ink-3:     #6a7078;
+
+  /* the flame — the only chroma on the page */
+  --flame:      #ffa33d;
+  --flame-rgb:  255 163 61;
+  --flame-hot:  #ffe2b0;
+  --flame-deep: #d9631f;
+
+  /* a refusal, or a query that missed the budget. Text only. */
+  --warn:      #dd8168;
+  --warn-rgb:  221 129 104;
+
+  --radius:    10px;
+  --radius-sm: 7px;
+
+  --serif:   "Newsreader", "Noto Serif Devanagari", Georgia, "Times New Roman", serif;
+  --display: "Instrument Serif", "Noto Serif Devanagari", Georgia, serif;
+  --mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 24px 60px -30px rgb(0 0 0 / .9);
+
+  --rail-w:   276px;
+  --studio-w: 320px;
+  --topbar-h: 56px;
+
+  color-scheme: dark;
+}
+
+/* Light is a second design rather than an inversion: paper under the same
+   lamp. The flame darkens so it still carries as light on a pale ground. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ground:   #fcfcfb;
+    --ground-2: #f4f4f2;
+    --raise:    #ffffff;
+    --raise-2:  #f7f7f5;
+    --line:     #e5e5e1;
+    --line-2:   #cfcfc9;
+    --ink:      #14161a;
+    --ink-2:    #585e66;
+    --ink-3:    #8a9099;
+    --flame:      #bf6a10;
+    --flame-rgb:  191 106 16;
+    --flame-hot:  #e9a244;
+    --flame-deep: #8f4408;
+    --warn:      #b0492a;
+    --warn-rgb:  176 73 42;
+    --shadow: 0 1px 2px rgb(20 22 26 / .06), 0 24px 50px -30px rgb(20 22 26 / .35);
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --ground:   #fcfcfb;
+  --ground-2: #f4f4f2;
+  --raise:    #ffffff;
+  --raise-2:  #f7f7f5;
+  --line:     #e5e5e1;
+  --line-2:   #cfcfc9;
+  --ink:      #14161a;
+  --ink-2:    #585e66;
+  --ink-3:    #8a9099;
+  --flame:      #bf6a10;
+  --flame-rgb:  191 106 16;
+  --flame-hot:  #e9a244;
+  --flame-deep: #8f4408;
+  --warn:      #b0492a;
+  --warn-rgb:  176 73 42;
+  --shadow: 0 1px 2px rgb(20 22 26 / .06), 0 24px 50px -30px rgb(20 22 26 / .35);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 16px/1.6 var(--serif);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: rgb(var(--flame-rgb) / .22); color: var(--ink); }
+:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 2px; border-radius: 3px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+/* Two label styles, both serif. A tracked small-cap names a region of the
+   page; a plain one names a single control. Using the tracked form for both
+   is what makes a panel read as an instrument rather than a page. */
+.pane-title, .card-h {
+  margin: 0;
+  font: 500 12px/1 var(--serif);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.field label {
+  font: 400 13.5px/1.4 var(--serif);
+  color: var(--ink-3);
+}
+
+/* ─── shell ────────────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--studio-w);
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  grid-template-areas: "top top top" "rail chat studio";
+  height: 100dvh;
+}
+
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.brand-mark {
+  width: 8px; height: 8px; border-radius: 50%; align-self: center;
+  background: radial-gradient(circle at 40% 35%, var(--flame-hot), var(--flame) 55%, var(--flame-deep));
+  box-shadow: 0 0 12px rgb(var(--flame-rgb) / .8);
+}
+.brand-name {
+  font: 400 23px/1 var(--display);
+  letter-spacing: .005em;
+}
+.brand-deva { font: 400 13px/1 var(--serif); color: var(--ink-3); }
+
+.topbar-actions { display: flex; align-items: center; gap: 4px; }
+
+.pane-btn {
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color .16s, background .16s;
+}
+.pane-btn:hover { color: var(--ink); background: var(--ground-2); }
+#rail-toggle, #studio-toggle { display: none; }
+
+/* ─── panes ────────────────────────────────────────────────────────────── */
+/* Rule 3: panes share one ground and are separated by a rule, not a fill. */
+
+.rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--ground);
+}
+
+.studio {
+  grid-area: studio;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  background: var(--ground);
+}
+.studio-scroll { height: 100%; overflow-y: auto; padding: 20px 18px 32px; }
+
+.chat {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* The lamp spills a little into the room it lights. This is the only
+     gradient in the file and it is doing a literal job. */
+  background:
+    radial-gradient(70% 50% at 100% 0%, rgb(var(--flame-rgb) / .045), transparent 72%),
+    var(--ground);
+}
+
+/* ─── sources rail ─────────────────────────────────────────────────────── */
+
+.rail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 18px 12px;
+}
+
+.ghost-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px;
+  font-size: 14px;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.ghost-btn:hover { color: var(--ink); background: var(--ground-2); border-color: var(--ink-3); }
+.ghost-btn[aria-expanded="true"] { color: var(--ink); background: var(--raise-2); }
+
+.add-panel {
+  margin: 0 14px 14px;
+  padding: 12px;
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.seg {
+  display: flex;
+  margin-bottom: 11px;
+  border-bottom: 1px solid var(--line);
+}
+.seg-btn {
+  flex: 1;
+  padding: 0 0 8px;
+  margin-bottom: -1px;
+  font-size: 14px;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  transition: color .14s, border-color .14s;
+}
+.seg-btn:hover { color: var(--ink-2); }
+.seg-btn.is-on { color: var(--ink); border-bottom-color: var(--ink); }
+
+.add-pane textarea, .add-pane input {
+  width: 100%;
+  padding: 9px 11px;
+  font: 400 14.5px/1.55 var(--serif);
+  color: var(--ink);
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+.add-pane textarea::placeholder, .add-pane input::placeholder { color: var(--ink-3); }
+.add-pane textarea:focus, .add-pane input:focus {
+  outline: none; border-color: var(--ink-3);
+}
+.add-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.add-row input { flex: 1; min-width: 0; }
+
+/* The primary button is ink on paper — the flame is a light, not a brand
+   colour, and putting it on a button would make it decoration (rule 1). */
+.btn {
+  padding: 8px 15px;
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--ground);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity .14s;
+}
+.btn:hover { opacity: .85; }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn-quiet {
+  color: var(--ink-2);
+  background: transparent;
+  border-color: var(--line-2);
+}
+.btn-quiet:hover { color: var(--ink); border-color: var(--ink-3); opacity: 1; }
+
+.drop {
+  display: grid; place-items: center; gap: 6px;
+  padding: 22px 12px;
+  text-align: center;
+  color: var(--ink-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color .16s, color .16s, background .16s;
+}
+.drop:hover, .drop.is-over { border-color: var(--ink-3); color: var(--ink-2); background: var(--raise); }
+.drop-text { font-size: 14px; }
+.drop-text strong { color: var(--ink); font-weight: 500; }
+.drop-hint { font-size: 12px; letter-spacing: .02em; }
+
+.add-note { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-3); }
+.add-error {
+  display: grid; gap: 2px;
+  margin: 10px 0 0; padding: 9px 11px;
+  font-size: 13.5px;
+  color: var(--warn);
+  border: 1px solid rgb(var(--warn-rgb) / .35);
+  border-radius: var(--radius-sm);
+}
+.add-error span { color: var(--ink-2); }
+
+.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 12px; }
+
+.src {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.src-corpus { background: var(--raise); border-color: var(--line-2); }
+.src[data-status="error"] { border-color: rgb(var(--warn-rgb) / .45); }
+.src[data-enabled="0"] { opacity: .45; }
+
+.src-kind {
+  padding: 2px 7px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+}
+
+.src-body { min-width: 0; }
+.src-title {
+  font-size: 14.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-meta {
+  font-size: 12.5px; line-height: 1.45;
+  color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-meta[data-error="1"] { color: var(--warn); }
+.src-locked { display: grid; place-items: center; color: var(--ink-3); }
+
+.src-actions { display: flex; align-items: center; gap: 4px; }
+.src-toggle {
+  position: relative;
+  width: 26px; height: 15px;
+  padding: 0;
+  background: var(--line-2);
+  border: 0; border-radius: 100px;
+  cursor: pointer;
+  transition: background .16s;
+}
+.src-toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 11px; height: 11px;
+  background: var(--ground);
+  border-radius: 50%;
+  transition: transform .16s;
+}
+.src-toggle[aria-pressed="true"] { background: var(--ink); }
+.src-toggle[aria-pressed="true"]::after { transform: translateX(11px); }
+
+.src-x {
+  display: grid; place-items: center;
+  width: 22px; height: 22px;
+  color: var(--ink-3);
+  background: transparent; border: 0; border-radius: 5px;
+  cursor: pointer;
+  transition: color .14s;
+}
+.src-x:hover { color: var(--warn); }
+
+.src-progress {
+  grid-column: 1 / -1;
+  height: 1.5px;
+  background: var(--line);
+  overflow: hidden;
+}
+.src-progress i { display: block; height: 100%; background: var(--ink-2); }
+
+.src-empty {
+  margin: 12px 2px;
+  font-size: 13.5px; line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.rail-foot {
+  padding: 11px 18px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  border-top: 1px solid var(--line);
+}
+
+/* ─── conversation ─────────────────────────────────────────────────────── */
+
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 34px 0 8px;
+  scroll-behavior: smooth;
+}
+.thread > * { max-width: 700px; margin-inline: auto; padding-inline: 28px; }
+
+.welcome { padding-top: 7vh; padding-bottom: 14px; }
+.welcome-h {
+  margin: 0 0 16px;
+  font: 400 46px/1.1 var(--display);
+  letter-spacing: -0.012em;
+}
+.welcome-p {
+  margin: 0 0 28px;
+  max-width: 46ch;
+  font-size: 16.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.welcome-p em { font-style: italic; color: var(--ink); }
+
+.suggest { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: baseline; gap: 9px;
+  padding: 8px 14px;
+  font-size: 14.5px;
+  text-align: left;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.chip:hover { color: var(--ink); border-color: var(--ink-3); background: var(--ground-2); }
+.chip-lang {
+  font-size: 11.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* -- messages ------------------------------------------------------------ */
+
+.msg { margin-bottom: 28px; }
+
+.msg-user { display: flex; justify-content: flex-end; }
+.msg-user .bubble {
+  max-width: 80%;
+  padding: 9px 16px;
+  font-size: 16px;
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.msg-user .bubble[data-voice="1"]::before {
+  content: "";
+  display: inline-block;
+  width: 11px; height: 11px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  background: currentColor;
+  opacity: .45;
+  -webkit-mask: var(--mic-mask) center/contain no-repeat;
+  mask: var(--mic-mask) center/contain no-repeat;
+}
+:root { --mic-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3z'/%3E%3Cpath d='M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21a1 1 0 1 0 2 0v-3.08A7 7 0 0 0 19 11z'/%3E%3C/svg%3E"); }
+
+.msg-bot { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; }
+
+/* The lamp signs its own answers — one of the three places colour is allowed
+   (rule 1), because this dot is the same light as the one in the wordmark. */
+.msg-dot {
+  width: 8px; height: 8px;
+  margin: 9px 0 0 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, var(--flame-hot), var(--flame) 55%, var(--flame-deep));
+  box-shadow: 0 0 10px rgb(var(--flame-rgb) / .7);
+}
+.msg-bot[data-status="refused"] .msg-dot {
+  background: none;
+  border: 1px solid var(--ink-3);
+  box-shadow: none;
+}
+.msg-bot[data-status="pending"] .msg-dot { animation: wick 1.2s ease-in-out infinite; }
+@keyframes wick { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+.answer-text {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.msg-bot[data-status="refused"] .answer-text { color: var(--ink-2); }
+.msg-bot[data-status="pending"] .answer-text { color: var(--ink-3); }
+
+.refusal-why {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-style: italic;
+  color: var(--warn);
+}
+
+/* -- the speed reading ---------------------------------------------------- */
+/* Small, inline, one per answer — the reading belongs to the answer it
+   describes, not to a separate screen you have to go and find. */
+
+.msg-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin-top: 12px;
+}
+
+.speed {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  padding: 0;
+  font: 400 13px/1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: color .14s, border-color .14s;
+}
+.speed:hover { color: var(--ink); border-bottom-color: var(--ink-3); }
+.speed[data-over="1"] { color: var(--warn); border-bottom-color: rgb(var(--warn-rgb) / .5); }
+.speed-unit { font-size: 11px; color: var(--ink-3); }
+.speed[data-over="1"] .speed-unit { color: inherit; }
+
+.meta-btn {
+  padding: 0;
+  font: 400 13.5px/1.5 var(--serif);
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  transition: color .14s, border-color .14s;
+}
+.meta-btn:hover { color: var(--ink-2); border-bottom-color: var(--line-2); }
+.meta-btn[aria-pressed="true"], .meta-btn[aria-expanded="true"] {
+  color: var(--ink); border-bottom-color: var(--ink-3);
+}
+.meta-note { font: 400 12.5px/1.5 var(--mono); color: var(--ink-3); }
+
+/* -- expanded stage breakdown -------------------------------------------- */
+
+.stages-panel {
+  margin-top: 14px;
+  padding: 16px 16px 14px;
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.track {
+  position: relative;
+  height: 3px;
+  margin-bottom: 28px;
+  background: var(--line);
+}
+.track-fill {
+  height: 100%;
+  min-width: 2px;
+  background: var(--ink);
+}
+.track-fill[data-over="1"] { background: var(--warn); }
+.track-ticks { position: absolute; inset: 0; pointer-events: none; }
+.track-ticks span {
+  position: absolute; top: 10px;
+  font: 400 10.5px/1 var(--mono);
+  /* The 200 ms cap label is the widest of these and sits hard against the
+     right edge. Left to wrap it lands on top of the first stage row. */
+  white-space: nowrap;
+  color: var(--ink-3);
+  transform: translateX(-50%);
+}
+.track-ticks i {
+  position: absolute; left: 50%; top: -10px;
+  width: 1px; height: 5px;
+  background: var(--line-2);
+}
+.track-cap { left: 100%; transform: translateX(-100%) !important; }
+.track-cap i { left: auto; right: 0; }
+
+.stage-row {
+  display: grid;
+  grid-template-columns: 114px minmax(0, 1fr) 54px;
+  align-items: center;
+  gap: 10px;
+  padding: 2.5px 0;
+}
+.stage-name { font: 400 12.5px/1.5 var(--mono); color: var(--ink-2); }
+.stage-bar { height: 3px; background: var(--line); overflow: hidden; }
+.stage-fill { display: block; height: 100%; background: var(--ink-3); }
+.stage-fill[data-outcome="skipped"] { background: repeating-linear-gradient(90deg, var(--line-2) 0 3px, transparent 3px 6px); }
+.stage-fill[data-outcome="failed"] { background: var(--warn); }
+.stage-ms {
+  font: 400 12px/1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3); text-align: right;
+}
+
+.meter-plan {
+  margin: 14px 0 0;
+  font-size: 12.5px; line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* -- citations ------------------------------------------------------------ */
+
+.cites-panel { margin-top: 14px; display: grid; gap: 8px; }
+.cite {
+  padding: 12px 14px;
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.cite[data-user="1"] { border-left-color: var(--ink-3); }
+.cite-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+.tag {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--ink-3);
+}
+.src-badge {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  max-width: 180px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cite-score {
+  margin-left: auto;
+  font: 400 11.5px/1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.cite-text {
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cite.is-open .cite-text { -webkit-line-clamp: unset; }
+.cite-more {
+  margin-top: 7px;
+  padding: 0;
+  font: 400 13px/1.4 var(--serif);
+  color: var(--ink-3);
+  background: none; border: 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  transition: color .14s, border-color .14s;
+}
+.cite-more:hover { color: var(--ink); border-bottom-color: var(--line-2); }
+.cite-empty { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); }
+
+/* -- the rewritten answer -------------------------------------------------- */
+
+.polish {
+  margin-top: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line-2);
+}
+.polish-label {
+  display: flex; align-items: baseline; gap: 7px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.polish-label em { font-style: italic; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.polish-text { margin: 0; font-size: 16px; line-height: 1.7; }
+
+/* ─── composer ─────────────────────────────────────────────────────────── */
+
+.transcript {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 8px 28px;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.transcript[data-partial="1"] { color: var(--ink-3); font-style: italic; }
+.transcript[data-error="1"] { color: var(--warn); font-style: normal; }
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(700px, 100%);
+  margin: 0 auto;
+  padding: 10px 28px 6px;
+}
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 13px 18px;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color .16s, background .16s;
+}
+.composer-input::placeholder { color: var(--ink-3); }
+.composer-input:focus { outline: none; border-color: var(--ink-3); background: var(--raise); }
+.composer-input:disabled { opacity: .5; }
+
+.mic-btn, .send-btn {
+  display: grid; place-items: center;
+  flex: none;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color .16s, background .16s, border-color .16s;
+}
+.mic-btn {
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line-2);
+}
+.mic-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+/* Recording is a live state, so it takes ink at full strength rather than a
+   colour — the only lit thing on screen stays the lamp. */
+.mic-btn[data-on="1"] {
+  color: var(--ground);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.send-btn {
+  color: var(--ground);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+}
+.send-btn:hover:not(:disabled) { opacity: .85; }
+.mic-btn:disabled, .send-btn:disabled { opacity: .35; cursor: default; }
+
+.composer-note {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 0 28px 14px;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* ─── the lamp pane ────────────────────────────────────────────────────── */
+
+.orb-block { text-align: center; padding: 2px 0 22px; }
+
+.orb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 250px;
+  margin: 0 auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.orb-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* Path 3 from orb.ts: no WebGL, or reduced motion. A static ember that still
+   carries every state through colour alone. */
+.orb-ember { display: none; }
+.orb[data-mode="static"] .orb-ember {
+  display: block;
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 46%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 38%, var(--flame-hot), var(--flame) 45%, var(--flame-deep) 78%, transparent);
+  box-shadow: 0 0 70px -6px rgb(var(--flame-rgb) / .45);
+  transition: filter .3s, opacity .3s;
+}
+.orb[data-mode="static"][data-state="dormant"] .orb-ember { filter: saturate(.3) brightness(.45); }
+.orb[data-mode="static"][data-state="refused"] .orb-ember { filter: saturate(.4) brightness(.6); }
+.orb[data-mode="static"][data-state="thinking"] .orb-ember { filter: brightness(1.25); }
+
+.orb-caption {
+  margin: 10px 0 4px;
+  font: 400 20px/1.3 var(--display);
+}
+.orb-sub {
+  margin: 0 auto;
+  max-width: 30ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  min-height: 3.1em;
+}
+
+.card {
+  padding: 0;
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.card:last-child { border-bottom: 0; }
+.card-h { margin-bottom: 14px; }
+.card-note { margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+
+.field { display: grid; gap: 6px; margin-bottom: 12px; }
+.field select {
+  width: 100%;
+  padding: 9px 11px;
+  font: 400 14.5px var(--serif);
+  color: var(--ink);
+  background: var(--ground-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.field select:focus { outline: none; border-color: var(--ink-3); }
+
+.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
+.stat {
+  display: grid; gap: 4px;
+  padding: 12px 6px;
+  text-align: center;
+  background: var(--ground);
+}
+.stat-v {
+  font: 400 22px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.stat-k {
+  font-size: 11.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ─── responsive ───────────────────────────────────────────────────────── */
+
+.scrim {
+  position: fixed; inset: 0;
+  z-index: 8;
+  background: rgb(0 0 0 / .5);
+}
+
+@media (max-width: 1180px) {
+  :root { --rail-w: 250px; --studio-w: 300px; }
+  .welcome-h { font-size: 40px; }
+}
+
+/* Below this the three panes stop fitting honestly, so the side panes become
+   overlays and the conversation keeps the full width. */
+@media (max-width: 1000px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "chat"; }
+  #rail-toggle, #studio-toggle { display: grid; }
+  .rail, .studio {
+    position: fixed;
+    top: var(--topbar-h); bottom: 0;
+    z-index: 9;
+    width: min(320px, 86vw);
+    background: var(--ground);
+    box-shadow: var(--shadow);
+    transition: transform .22s ease;
+  }
+  .rail { left: 0; transform: translateX(-101%); }
+  .studio { right: 0; transform: translateX(101%); }
+  .rail[data-open="1"], .studio[data-open="1"] { transform: none; }
+  .thread > *, .composer, .composer-note, .transcript { max-width: 640px; }
+}
+
+@media (max-width: 560px) {
+  .welcome { padding-top: 4vh; }
+  .welcome-h { font-size: 32px; }
+  .thread > *, .composer, .composer-note, .transcript { padding-inline: 18px; }
+  .msg-user .bubble { max-width: 92%; }
+  .stage-row { grid-template-columns: 84px minmax(0, 1fr) 48px; }
+}
+
+/* The lamp is the whole point, but not at the cost of a vestibular headache.
+   `orb.ts` also refuses to start any renderer under this query — this is the
+   belt to that braces. */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+  .thread { scroll-behavior: auto; }
+}

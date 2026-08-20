@@ -1,0 +1,52 @@
+{
+  "lang": "hin",
+  "dim": 256,
+  "codeWords": 8,
+  "numPassages": 98867,
+  "strategies": {
+    "whole": {
+      "count": 98867,
+      "nlist": 629,
+      "avgListSize": 157.181240063593
+    },
+    "sentence": {
+      "count": 252597,
+      "nlist": 1005,
+      "avgListSize": 251.34029850746268
+    },
+    "sliding": {
+      "count": 250240,
+      "nlist": 1000,
+      "avgListSize": 250.24
+    },
+    "contextual": {
+      "count": 98867,
+      "nlist": 629,
+      "avgListSize": 157.181240063593
+    },
+    "semantic": {
+      "count": 75788,
+      "nlist": 551,
+      "avgListSize": 137.54627949183302
+    },
+    "document": {
+      "count": 33248,
+      "nlist": 365,
+      "avgListSize": 91.09041095890412
+    }
+  },
+  "model": "Xenova/multilingual-e5-small",
+  "builtAt": "2026-08-19T16:50:26Z",
+  "passageShards": [
+    "passages.000.json",
+    "passages.001.json",
+    "passages.002.json",
+    "passages.003.json",
+    "passages.004.json",
+    "passages.005.json",
+    "passages.006.json",
+    "passages.007.json",
+    "passages.008.json",
+    "passages.009.json"
+  ]
+}
