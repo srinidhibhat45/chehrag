@@ -91,13 +91,17 @@ Everything in the fast path must be warmed at load and allocation-free per query
 - [x] uv / Python 3.12 env
 - [x] Dataset acquisition + subset — 10k queries, 98,867 passages
 - [x] Chunking strategies — 6 strategies, 809,607 chunks
+- [x] BM25 lexical index — 7th index, 99,703 terms / 2,995,581 postings
 - [x] Embedder verified (drift + throughput measured)
 - [x] Embedding run — 809,607 vectors in 58.2 min
 - [x] PCA 384->**256** (192 rejected: only 0.80 variance), quantization, IVF build
 - [x] Browser index format + loader (sharded passages)
 - [x] Harness — stage budgets, retries, degradation, circuit breaker
-- [x] Guardrails — 25/25 gate tests pass; gate 2 calibrated on holdout
-- [x] Bench — **P50 7.71 / P100 9.47 ms in-browser, 100% under 200ms**
+- [x] Guardrails — 90/90 gate cases pass; gate 2 calibrated on holdout;
+      gate 3a refuses fabricated citations
+- [x] Bench — **P50 18.8 / P100 27.5 ms in-browser interactive, 100% under 200ms**
+- [x] Tool-call loop — model calls typed tools; `search_corpus` executes in-browser
+- [x] End-to-end voice measured — STT P50 275.8 ms, retrieval P100 21.5 ms
 - [x] STT client (Sarvam streaming + batch fallback) — written, needs live key to verify
 - [x] Running locally, verified in browser (dev and production build)
 - [x] User sources — paste / file / URL, chunked+embedded client-side, fused with the corpus
@@ -646,3 +650,66 @@ percentile from a tab that just changed visibility state.**
 ElevenLabs remains unconfigured (`/health` → `elevenlabs: false`); Sarvam covers
 TTS for every language in the corpus, so this is a missing alternative rather
 than a missing capability.
+
+
+---
+
+## Addendum — the four gaps, and what closing them taught us
+
+Written after a pass re-reading the brief against the code rather than against
+the README. Four things were weaker than the documentation implied.
+
+**1. The chunking docstring promised a BM25 axis that did not exist.** Four axes
+were named; three were built. Building the fourth took four seconds of compute
+and produced the single most useful measurement in the project: over 1,412
+answerable queries, *no dense strategy is worth more than 0.4 points of hit@5*,
+and the lexical index is worth 2.3. Six chunkers that differ in where they cut
+find largely the same passages. One index that differs in *how it decides a
+match* does not.
+
+We had reasoned our way to this in the strategies docstring — "the axes that
+actually pay on this corpus" — and then built five things on axes (a)-(c) and
+none on (d). The corpus statistics were right and we under-followed them.
+
+**2. The harness had no tool calls.** It had budgets, retries, degradation and a
+circuit breaker — three of the four things requirement 5 lists — and the model
+call at the end was a string in, a string out, with a sentinel for refusal. It
+is now a typed tool contract, and the tool the model can call runs *in the
+browser*, because that is where the index is. The Worker stays stateless and
+holds nothing but a key.
+
+The bounded-loop design is worth recording: the bound is structural rather than
+a counter. Once the transcript shows a search has run, the Worker does not
+offer the tool again. A counter can be got wrong in one place; a tool that is
+absent cannot be called.
+
+**3. The 200 ms argument was an argument.** The README asserted that STT cannot
+fit inside the budget and cited vendor figures. It now measures: 60 questions
+spoken by Sarvam TTS, transcribed by Sarvam STT, answered by the pipeline. STT
+is 95% of the wall clock. The argument was correct, and stating it as a
+measurement is worth more than stating it well.
+
+**4. Retries were thinner than "retries" implied.** One stage declared them.
+Every network call — the ones that actually fail — had timeouts and no retry.
+Now both sides of the network retry 429/5xx and transport faults with jittered
+backoff, and never a 4xx.
+
+### Two things that went wrong while doing it, both instructive
+
+**The FNV prime's high word is 256, not 1.** `0x100000001B3` is `2^40 + 0x1B3`,
+so splitting it across 32-bit halves gives `primeHi = 0x100`. We wrote 1. Every
+hash was correct in its low word and wrong in its high word, which means every
+dictionary lookup would have missed, which means the lexical index would have
+returned nothing at all — indistinguishable from BM25 simply not helping, the
+exact question the ablation was built to answer. The parity test caught it on
+its first run. It is the third silent cross-language bug this project has found
+with the same technique, after bit packing and PCA layout.
+
+**A planner that does not know about a stage overruns by exactly that stage's
+cost.** `budgetPlan` models `nprobe`, `perStrategyK` and `rescoreTopN`. The
+lexical scan is bounded by a postings cap instead, so it is a fixed cost the
+ladder cannot reduce — and it was not in the model. The budget bench caught it
+immediately: the cap that had held to an 8 ms budget now broke at 10 ms. Adding
+one constant restored it. The lesson is not the constant; it is that the
+degradation ladder is only as honest as its cost model, and adding work to the
+hot path means adding it to the planner in the same commit.
