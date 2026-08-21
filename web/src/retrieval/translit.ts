@@ -1,27 +1,23 @@
 /**
- * Romanised Hindi, folded back into Devanagari before embedding.
+ * Romanised Hindi, folded back to Devanagari before embedding.
  *
- * The corpus is Devanagari and the embedder is multilingual, so a question in
- * either Hindi or English retrieves from it well. Romanised Hindi — "Corporation
- * kya hai" — retrieves badly, and worse than either half would alone:
+ * The corpus is Devanagari and e5 is multilingual, so Hindi or English both
+ * retrieve well. Romanised Hindi retrieves worse than either half alone:
  *
  *     निगम क्या है              0.7275   answered
  *     what is a corporation     0.5376   answered
- *     Corporation kya hai       0.3846   refused, threshold 0.4788
+ *     Corporation kya hai       0.3846   refused
  *
- * e5's training data is written in the scripts its languages actually use, so
- * `kya` and `hai` are not Hindi to it, and they are not English either. They are
- * unmodelled tokens that pull the vector away from the region the content word
- * points at. The damage grows with the amount of scaffolding: "mujhe corporation
- * ke bare mein bataiye" scores 0.3232 and returns passages about Uber.
+ * e5 saw its languages in the scripts they are written in, so `kya` and `hai`
+ * are neither Hindi nor English to it, just unmodelled tokens pulling the
+ * vector off the content word. It gets worse with scaffolding: "mujhe
+ * corporation ke bare mein bataiye" scores 0.3232 and returns Uber.
  *
- * Mapping the function words back to Devanagari restores the sentence shape the
- * model was trained on, and the English content word survives untouched — e5
- * handles code-mixed `corporation क्या है` (0.5984) far better than romanised
- * Hindi. Only closed-class words are mapped. Transliterating content words needs
- * an open vocabulary and a real transliteration model, so a query whose *subject*
- * is romanised ("nigam kya hai") is still not retrievable; that is a known limit
- * rather than something this file half-solves.
+ * Mapping the function words back restores the sentence shape the model was
+ * trained on and leaves the English content word alone; code-mixed
+ * `corporation क्या है` scores 0.5984. Closed-class words only. A query whose
+ * subject is romanised ("nigam kya hai") still will not retrieve - that needs a
+ * real transliteration model and an open vocabulary.
  */
 
 /**
@@ -57,11 +53,10 @@ const TRANSLIT: Record<string, string> = {
 /**
  * Request scaffolding, dropped rather than mapped.
  *
- * "mujhe … bataiye" names no subject, and in Devanagari it embeds toward
- * first-person narrative passages: transliterated in full, "mujhe corporation ke
- * bare mein bataiye" returns a passage beginning "मुझे पता चला कि मेरे खिलाफ…".
- * Removing the first-person framing and keeping the rest scores better than
- * either transliterating or stripping everything.
+ * "mujhe ... bataiye" names no subject and in Devanagari embeds toward
+ * first-person narrative: transliterated in full it returns a passage starting
+ * "मुझे पता चला कि मेरे खिलाफ...". Dropping the framing beats both
+ * transliterating it and stripping everything.
  */
 const SCAFFOLD = new Set([
   "mujhe", "muje", "mera", "meri", "mere", "hume", "humein",
@@ -74,7 +69,7 @@ const SCAFFOLD = new Set([
 /**
  * Romanised tokens that are also ordinary English words.
  *
- * Excluded from *detection* only. "how much does he pay me" must not read as
+ * Excluded from detection only. "how much does he pay me" must not read as
  * Hindi on the strength of `he` and `me`; but once a query is established as
  * romanised Hindi by its other words, `me` in it really is में.
  */
@@ -102,12 +97,11 @@ function markerRatio(w: string[]): number {
 }
 
 /**
- * Minimum share of romanised-Hindi markers before a query is treated as Hinglish.
+ * Minimum share of markers before a query counts as Hinglish.
  *
- * Real romanised Hindi measures 0.5 and up; English and Devanagari queries
- * measure 0. The gap is wide because `AMBIGUOUS` removes the words that appear in
- * both languages, so the floor exists to stop a single stray token — a name, a
- * typo, an acronym — from rewriting an English question.
+ * Real romanised Hindi measures 0.5 and up, English and Devanagari measure 0.
+ * `AMBIGUOUS` is what makes the gap that wide; the floor just stops one stray
+ * token (a name, a typo, an acronym) rewriting an English question.
  */
 const MIN_MARKER_RATIO = 0.3;
 

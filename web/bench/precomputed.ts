@@ -3,8 +3,8 @@
  *
  * Two properties, and the second is the one that matters. Returning a stored
  * answer for a question it was not written for is worse than any latency it
- * saves, so the decoys below are questions that retrieve *well* from this corpus
- * and still must not match — a near neighbour is the failure mode, not a random
+ * saves, so the decoys below are questions that retrieve well from this corpus
+ * and still must not match - a near neighbour is the failure mode, not a random
  * string.
  *
  * Run after `bench/precompute.ts`:
@@ -59,7 +59,7 @@ const done = store.pairs.map((p) => ({ query: p.q, answer: p.a }));
 
 let hit = 0, miss = 0;
 console.log("─".repeat(74));
-console.log("EXACT — every precomputed question must find its own answer");
+console.log("EXACT - every precomputed question must find its own answer");
 console.log("─".repeat(74));
 for (const d of done.slice(0, 8)) {
   const r = await engine.ask(d.query, { skipCache: true });
@@ -71,7 +71,7 @@ for (const d of done.slice(0, 8)) {
 }
 
 console.log("\n" + "─".repeat(74));
-console.log("WRONG QUESTION — must NOT return a stored answer");
+console.log("WRONG QUESTION - must NOT return a stored answer");
 console.log("─".repeat(74));
 const DECOYS = [
   "what is the capital of Peru",

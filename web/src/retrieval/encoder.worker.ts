@@ -1,19 +1,16 @@
 /**
  * The embedding model, on its own thread.
  *
- * Embedding is the most expensive thing in the query path (~7ms of a ~10ms
- * query) and also what ingestion spends minutes doing. On one thread the two
- * compete: ask a question while a PDF indexes and it queues behind hundreds of
- * ingestion batches, which the per-stage budgets cannot rescue because the time
- * is spent before the stage starts.
+ * Embedding is the most expensive thing in the query path and also what
+ * ingestion spends minutes doing. Share a thread and a question asked during a
+ * PDF import queues behind hundreds of ingestion batches, which no per-stage
+ * budget can rescue: the time is spent before the stage starts.
  *
- * Moving inference here costs ~0.3ms of postMessage per query and buys three
- * things: ingestion never blocks a query, the main thread never janks, and
- * ONNX's allocations stop landing in the same GC arena as the UI — which is
- * where P100 jitter comes from.
+ * Costs ~0.3ms of postMessage per query. Buys three things: ingestion never
+ * blocks a query, the main thread never janks, and ONNX stops allocating in the
+ * same GC arena as the UI, which is where P100 jitter came from.
  *
- * Scheduling lives on the main thread (see `encoder.ts`), which holds the
- * ingestion queue and dispatches one small batch at a time.
+ * Scheduling stays on the main thread (`encoder.ts`).
  */
 
 import { pipeline, env } from "@huggingface/transformers";
@@ -53,7 +50,7 @@ export type Res =
 /**
  * Cumulative download progress across the model's files.
  *
- * transformers.js reports per file — config, tokenizer, ONNX weights — so the
+ * transformers.js reports per file - config, tokenizer, ONNX weights - so the
  * per-file numbers are held and totalled rather than forwarded one at a time.
  *
  * Files already in the browser cache emit no `progress` at all, which is why
@@ -83,6 +80,20 @@ async function init(): Promise<number> {
   // Weights come from the HF CDN once, then from the browser cache. Nothing
   // here is on the query path.
   env.allowLocalModels = false;
+
+  // onnxruntime-web runs the graph on a single WASM thread unless told
+  // otherwise, and the forward pass is the dominant cost in the query budget.
+  // Threads need SharedArrayBuffer, which needs cross-origin isolation, which
+  // `public/_headers` sets - so this is where that header actually pays.
+  //
+  // Measured in-browser over 36 corpus queries: 1 thread embeds in 51 ms,
+  // 4 in 16.3, 8 in 15.2. Four is where the curve flattens, and the page still
+  // has a UI and a shader that want cores.
+  const wasm = env.backends?.onnx?.wasm;
+  if (wasm) {
+    const cores = self.navigator?.hardwareConcurrency ?? 4;
+    wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, cores - 1)) : 1;
+  }
   extractor = (await pipeline("feature-extraction", MODEL_ID, {
     dtype: DTYPE,
     progress_callback: onModelProgress,
@@ -92,6 +103,8 @@ async function init(): Promise<number> {
   // allocates every buffer and triggers JIT, running 5-20x slower.
   const out = await extractor("query: warmup", { pooling: "mean", normalize: true });
   dim = out.dims[out.dims.length - 1] ?? 384;
+  console.info(`[chehrag] encoder ready - wasm threads ${env.backends?.onnx?.wasm?.numThreads}, ` +
+               `isolated ${self.crossOriginIsolated}`);
   return dim;
 }
 

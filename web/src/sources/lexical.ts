@@ -1,24 +1,16 @@
 /**
  * BM25 over the user's own sources.
  *
- * The corpus gets a lexical index because dense retrieval cannot hold an exact
- * token; a document someone adds needs it more, not less. The shipped corpus is
- * encyclopedia prose, where a paraphrase usually finds the passage. A CV, an
- * invoice, a config dump or a bank statement is mostly proper nouns, dates and
- * amounts — the exact tokens a 256-dimension average is worst at, and usually
- * the entire content of the question. "How old am I" against
+ * A personal document needs this more than the corpus does. Encyclopedia prose
+ * usually survives a paraphrase; a CV, an invoice or a bank statement is proper
+ * nouns, dates and amounts, which is what a 256-dim average is worst at and
+ * usually the whole of the question. "How old am I" against
  * `name: priya rao, age: 31` is a lexical match or it is nothing.
  *
- * Built here rather than shipped, because it is small and the source is not
- * known until someone adds it. Nothing is precomputed offline, nothing is
- * uploaded, and the build is a single pass over the passage text — a few
- * milliseconds for a document, against the seconds of embedding that follow it.
- *
- * The corpus version of this (`retrieval/lexical.ts`) reads a sorted hash
- * dictionary out of a shipped binary because it holds 99,703 terms and must not
- * parse anything at boot. Here a plain `Map` is the right structure: the
- * vocabulary is thousands of terms, it changes whenever a source is added, and
- * the whole thing is rebuilt more cheaply than a binary format could be parsed.
+ * Built at ingest, in one pass over the passage text: a few ms per document
+ * against the seconds of embedding that follow. A plain Map is right here,
+ * where the corpus version reads a sorted hash dictionary out of a binary - the
+ * vocabulary is thousands of terms and changes every time a source is added.
  */
 
 import { contentTokens } from "../retrieval/tokens";
@@ -51,7 +43,7 @@ export class UserLexical {
       const ord = base + i;
       // Duplicates are kept: BM25 needs term frequency, where the gates only
       // need presence. `contentTokens` de-duplicates, so tf is counted from the
-      // raw list it was built from — approximated here by counting occurrences
+      // raw list it was built from - approximated here by counting occurrences
       // of each content token in the text, which is what the corpus builder
       // does exactly.
       const tokens = tokenList(texts[i]);
@@ -72,17 +64,12 @@ export class UserLexical {
   }
 
   /**
-   * Drop a source.
+   * Drop a source: postings stay, passages are marked dead.
    *
-   * Its postings stay where they are and its passages are marked dead, matching
-   * how `SourceStore` treats passage text: ordinals are permanent index keys and
-   * renumbering would invalidate every surviving chunk's parent. Dead documents
-   * are skipped at scoring time, so they cost a comparison and nothing else.
-   *
-   * Document frequency is left including them, which drifts a term's IDF
-   * slightly after a removal. The alternative is a full rebuild on every
-   * delete, and IDF over a few thousand passages is not sensitive enough to
-   * justify it.
+   * Ordinals are permanent index keys, so renumbering would invalidate every
+   * surviving chunk's parent. Dead documents cost one comparison at scoring
+   * time. df still counts them, which drifts IDF slightly after a delete; a
+   * full rebuild per delete is not worth it at a few thousand passages.
    */
   removeSource(sourceId: number): void {
     for (let i = 0; i < this.source.length; i++) {

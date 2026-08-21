@@ -3,7 +3,7 @@
  *
  * MS MARCO's "unanswerable" split is adversarial: those queries still carry ten
  * topically-relevant passages, so retrieval confidence barely separates them
- * (AUC 0.65). But gate 2's real production job is different — catching questions
+ * (AUC 0.65). But gate 2's real production job is different - catching questions
  * the corpus has nothing to say about at all. This measures that case, which the
  * MS MARCO label cannot.
  */
@@ -28,7 +28,7 @@ const engine = new RagEngine(assembleIndex(manifest, buf, passages), await (asyn
   const e = new E5Encoder(); await e.init(); return e;
 })(), { ...DEFAULT_CONFIG, thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0,
                 rescueMinScore: Infinity, rescueMinOverlap: 1 } });
-// The engine ships with the corpus off — the app starts empty so that an
+// The engine ships with the corpus off - the app starts empty so that an
 // answer can only have come from what the user added. Every benchmark here
 // exists to measure that corpus, so it opts in explicitly.
 engine.setCorpusEnabled(true);

@@ -1,22 +1,16 @@
 /**
  * The first-run curtain.
  *
- * Modal because the block is real. The lamp and the composer are enabled at the
- * end of `boot()`, and `SourcesPanel` is not constructed until the encoder and
- * the store exist, so there is genuinely nothing to do until then. The curtain
- * covers exactly that window.
+ * Modal because the block is real: the lamp and composer are enabled at the end
+ * of `boot()` and SourcesPanel does not exist until the encoder and store do.
  *
- * It names the three things `boot()` awaits — index and model in parallel, then
- * warm-up — because the wait is a 40 MB index arriving in the browser, paid up
- * front so no later question touches the network. Named, that is a reason to
- * wait; unnamed, it is a hang.
+ * It names the three things boot() awaits - index and model in parallel, then
+ * warm-up - because the wait is an index arriving in the browser, paid once so
+ * no later question touches the network. Named, that is a reason to wait.
  *
- * `orb.setCharge()` fills behind this at the same rate, so the curtain is what
- * the lamp is doing, said in words.
- *
- * `lift()` is called after the inputs are enabled, never before, and a boot that
- * fails or stalls says so here rather than leaving a bar creeping toward a
- * hundred it will never reach.
+ * `lift()` runs after the inputs are enabled, never before, and a boot that
+ * stalls says so rather than leaving a bar creeping toward a hundred it will
+ * never reach.
  */
 
 export type CurtainStep = "index" | "model" | "warm";
@@ -117,7 +111,7 @@ export class Curtain {
       : `${MB(loaded)} of ~${MB(total)} MB`);
 
     if (this.allCached) {
-      this.foot.textContent = "Opening from cache — this is the fast path.";
+      this.foot.textContent = "Opening from cache - this is the fast path.";
     }
   }
 
@@ -166,7 +160,7 @@ export class Curtain {
 
   /**
    * Boot failed. Reported here rather than only on the orb, which is behind this
-   * — a curtain that never lifts is the worst way to surface an error.
+   * - a curtain that never lifts is the worst way to surface an error.
    */
   fail(message: string): void {
     if (this.done) return;
@@ -178,7 +172,7 @@ export class Curtain {
     this.head.textContent = "The lamp wouldn't light";
     this.error.textContent = message;
     this.error.hidden = false;
-    this.foot.textContent = "Nothing was uploaded and nothing was lost — this is a load failure.";
+    this.foot.textContent = "Nothing was uploaded and nothing was lost - this is a load failure.";
     this.retry.hidden = false;
     this.retry.focus();
     this.say(`Chehrag could not start. ${message}`);
@@ -231,7 +225,7 @@ export class Curtain {
   private say(text: string): void { this.sr.textContent = text; }
 
   /**
-   * A stalled download is not a failed one — the fetch may still be alive — so
+   * A stalled download is not a failed one - the fetch may still be alive - so
    * this reports an abnormal wait and offers a retry rather than claiming
    * failure.
    */

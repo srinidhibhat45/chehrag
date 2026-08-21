@@ -1,22 +1,19 @@
 /**
- * Query encoder — transformers.js over the same ONNX weights the index was built
+ * Query encoder. transformers.js over the same ONNX weights the index was built
  * with (Xenova/multilingual-e5-small, int8).
  *
- * Two implementations behind one interface:
+ *   E5Encoder      in-thread. The Node benchmark, and the browser fallback
+ *                  when module workers are unavailable.
+ *   WorkerEncoder  off-thread. What the app uses.
  *
- *   E5Encoder      in-thread. Used by the Node benchmark, and as the browser
- *                  fallback when module workers are unavailable.
- *   WorkerEncoder  off-thread (encoder.worker.ts). What the app uses.
+ * Same graph and same prefixes either way, so the benchmark exercises the
+ * deployed path.
  *
- * Both run the identical graph with identical prefixes, so the benchmark
- * exercises the deployed code path.
- *
- * Two details are easy to get wrong:
- *   - dtype 'q8' must match the build. The Python builder used
- *     model_quantized.onnx; drift against fp32 measured cos=0.996 with 100%
- *     top-10 rank agreement, but only for that pairing.
- *   - e5 requires the "query: " / "passage: " prefixes. It was contrastively
- *     trained with them, and omitting them costs recall silently.
+ * Two things to not get wrong:
+ *   - dtype 'q8' must match the build. Drift against fp32 measured cos=0.996
+ *     with 100% top-10 rank agreement, but only for that pairing.
+ *   - e5 needs the "query: " / "passage: " prefixes. It was trained with them
+ *     and dropping them costs recall silently.
  */
 
 import type { Encoder } from "../harness/rag";
@@ -36,7 +33,7 @@ type ExtractFn = (
 
 /**
  * Cumulative bytes of the model download. Called only while the encoder is first
- * loading and only for files actually coming over the network — a warm cache
+ * loading and only for files actually coming over the network - a warm cache
  * reports nothing, which the caller must read as "unknown", not "0%".
  */
 export type EncoderProgress = (loaded: number, total: number) => void;
@@ -60,7 +57,14 @@ export class E5Encoder implements BatchEncoder {
     // Dynamic for bundle reasons: a static import pulls ~870 kB of
     // transformers.js into the main chunk to have a fallback ready, on top of
     // the copy already in the worker chunk that actually runs.
-    const { pipeline } = await import("@huggingface/transformers");
+    const { pipeline, env } = await import("@huggingface/transformers");
+    // Same reason as `encoder.worker.ts`: onnxruntime-web runs on one WASM
+    // thread unless told otherwise. Browser only - Node uses the native
+    // binding and has no cross-origin isolation to key off.
+    if (typeof self !== "undefined" && self.crossOriginIsolated) {
+      const wasm = env.backends?.onnx?.wasm;
+      if (wasm) wasm.numThreads = Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency ?? 4) - 1));
+    }
     this.extractor = (await pipeline(
       "feature-extraction", MODEL_ID, {
         dtype: "q8",
@@ -75,13 +79,13 @@ export class E5Encoder implements BatchEncoder {
   }
 
   async encodeQuery(text: string): Promise<Float32Array> {
-    if (!this.extractor) throw new Error("encoder not initialised — call init() first");
+    if (!this.extractor) throw new Error("encoder not initialised - call init() first");
     const out = await this.extractor(`query: ${text}`, { pooling: "mean", normalize: true });
     return out.data instanceof Float32Array ? out.data : new Float32Array(out.data as ArrayLike<number>);
   }
 
   async encodePassages(texts: string[]): Promise<Float32Array[]> {
-    if (!this.extractor) throw new Error("encoder not initialised — call init() first");
+    if (!this.extractor) throw new Error("encoder not initialised - call init() first");
     if (!texts.length) return [];
     const out = await this.extractor(texts.map((t) => `passage: ${t}`),
       { pooling: "mean", normalize: true });
@@ -117,7 +121,7 @@ type Message = Req extends infer T
  * The worker handles messages serially, so priority is enforced on this side:
  * ingestion batches queue here and dispatch one at a time, and dispatch stops
  * while a query is in flight. A query therefore waits for at most one running
- * batch, which is why `BULK_BATCH` is small — at 8 passages a batch costs ~25ms,
+ * batch, which is why `BULK_BATCH` is small - at 8 passages a batch costs ~25ms,
  * bounding what a query can inherit from ingestion.
  */
 const BULK_BATCH = 8;
@@ -234,8 +238,8 @@ export class WorkerEncoder implements BatchEncoder {
 /**
  * Build the best encoder this environment supports.
  *
- * Worker construction can fail for external reasons — a restrictive CSP, an old
- * browser, a privacy extension — so this falls back in-thread rather than
+ * Worker construction can fail for external reasons - a restrictive CSP, an old
+ * browser, a privacy extension - so this falls back in-thread rather than
  * failing outright.
  */
 export async function createEncoder(onProgress?: EncoderProgress): Promise<BatchEncoder> {

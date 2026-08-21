@@ -1,5 +1,5 @@
 /**
- * The orb — main-thread side.
+ * The orb - main-thread side.
  *
  * Owns the canvas and the microphone envelope, and knows nothing about how the
  * fire is drawn. Three rendering paths, in preference order:
@@ -8,7 +8,7 @@
  *      thread never touches a frame again.
  *   2. In-thread WebGL, for browsers with WebGL2 but no `OffscreenCanvas`
  *      transfer, or where worker construction is blocked. The renderer is
- *      stopped for the duration of every measured query — see `freeze()` and
+ *      stopped for the duration of every measured query - see `freeze()` and
  *      `thaw()`, which apply on both paths.
  *   3. No WebGL: a static CSS ember carrying state through colour alone.
  *
@@ -201,7 +201,7 @@ export class Orb {
    * Drive the fire from the microphone while the user speaks.
    *
    * On the main thread, because that is where the `MediaStream` lives, but only
-   * while recording — never during a measured query.
+   * while recording - never during a measured query.
    */
   listenTo(stream: MediaStream): void {
     this.stopListening();
@@ -233,7 +233,7 @@ export class Orb {
       this.analyser.smoothingTimeConstant = 0.72;
       const src = this.audio.createMediaElementSource(el);
       src.connect(this.analyser);
-      // Must also reach the speakers — routing through an analyser alone
+      // Must also reach the speakers - routing through an analyser alone
       // silences the element.
       this.analyser.connect(this.audio.destination);
       this.bins = new Uint8Array(this.analyser.frequencyBinCount);

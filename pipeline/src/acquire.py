@@ -87,7 +87,7 @@ def main() -> None:
     n_unans = int(args.queries * args.unanswerable_share)
     n_ans = args.queries - n_unans
 
-    # Split each target proportionally across query_type, using the *answerable*
+    # Split each target proportionally across query_type, using the answerable
     # subpopulation's own type distribution so we don't distort it.
     def allocate(target: int, answerable: bool) -> list[int]:
         pool = {t: buckets[(t, answerable)] for t in

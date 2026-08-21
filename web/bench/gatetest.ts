@@ -17,8 +17,8 @@ const INPUT_CASES: Case[] = [
   ["कॉर्पोरेशन क्या है?", null],
   ["what is a corporation", null],
   ["capital of France", null],                     // keyword query, no question mark
-  ["How do vaccines work?", null],                 // medical topic — must NOT be blocked
-  ["what caused the second world war", null],      // violence as SUBJECT — must not be blocked
+  ["How do vaccines work?", null],                 // medical topic - must NOT be blocked
+  ["what caused the second world war", null],      // violence as SUBJECT - must not be blocked
   ["how to treat a snake bite", null],             // safety-adjacent but legitimate
 
   // --- injection ---
@@ -41,7 +41,7 @@ const INPUT_CASES: Case[] = [
   ["!!!!! ???? ....", "GIBBERISH"],
   ["Please go ahead and delete every file stored on the main production server now",
    "NOT_A_QUESTION"],
-  // A directive that carries a question marker is a question ABOUT the action.
+  // A directive that carries a question marker is a question about the action.
   ["how do I delete every file on a production server", null],
   // The information-seeking imperative. This shape used to be refused, which is
   // what the measurement in bench/multilingual.ts caught.
@@ -54,7 +54,7 @@ const INPUT_CASES: Case[] = [
   // not-a-question word threshold so they exercise gate 1 fully.
   //
   // These exist because of a specific bug. Gate 1 tested for letters with
-  // `[a-zA-Z ऀ-ॿ]` — Latin and Devanagari — so in a system advertising
+  // `[a-zA-Z ऀ-ॿ]` - Latin and Devanagari - so in a system advertising
   // fourteen Indian languages, nine of them were refused as GIBBERISH in
   // 0.1 ms, before any embedding was computed. It was invisible from the
   // outside: a fast, confident refusal looks exactly like a working guardrail.
@@ -77,7 +77,7 @@ const INPUT_CASES: Case[] = [
 
 let pass = 0, fail = 0;
 console.log("=".repeat(70));
-console.log("GATE 1 — input validation");
+console.log("GATE 1 - input validation");
 console.log("=".repeat(70));
 for (const [input, expected] of INPUT_CASES) {
   const r = gateInput(input);
@@ -96,7 +96,7 @@ hasSupport ? pass++ : fail++;
 console.log(`${hasSupport ? "  ok  " : "  FAIL"} self-harm response includes a support line`);
 
 console.log("\n" + "=".repeat(70));
-console.log("GATE 3 — grounding");
+console.log("GATE 3 - grounding");
 console.log("=".repeat(70));
 
 const ctx = ["निगम एक कंपनी या लोगों का समूह होता है जो एक एकल इकाई के रूप में कार्य करने के लिए अधिकृत होता है।"];
@@ -124,7 +124,7 @@ console.log(`${trimmed ? "  ok  " : "  FAIL"} mixed answer: invented sentence dr
 /*
  * The generated path, which is what gate 3 is actually for.
  *
- * The extractive fallback is grounded by construction — it returns spans — so
+ * The extractive fallback is grounded by construction - it returns spans - so
  * every case that matters here is a written sentence over a field-structured
  * document, which is the shape that used to be rejected wholesale. The check
  * that must never regress is the pair: the same sentence with the document's
@@ -164,15 +164,15 @@ for (const [answer, expected] of GEN_CASES) {
 }
 
 /*
- * Cross-lingual grounding — the case this corpus exists for.
+ * Cross-lingual grounding - the case this corpus exists for.
  *
  * MS MARCO-XI is Hindi passages answering questions in fourteen languages, so
- * an English answer written from a Hindi passage is the *normal* case, not an
+ * an English answer written from a Hindi passage is the normal case, not an
  * edge one. Word overlap between two scripts measures translation rather than
  * grounding: the correct answer below scored 0.000 and was rejected, which
  * silently disabled generated answers for every non-Hindi question.
  *
- * What still has to hold is the numeric check — a number is the one specific
+ * What still has to hold is the numeric check - a number is the one specific
  * that survives translation, and it survives a change of numeral system too.
  */
 console.log("\n" + "-".repeat(70));
@@ -203,7 +203,7 @@ for (const [answer, ctx, expected, label] of XLING) {
 }
 
 console.log("\n" + "=".repeat(70));
-console.log("TOKENISATION — Indic combining marks");
+console.log("TOKENISATION - Indic combining marks");
 console.log("=".repeat(70));
 
 /*
@@ -232,7 +232,7 @@ for (const [input, expected] of TOKENS) {
 }
 
 console.log("\n" + "=".repeat(70));
-console.log("ROMANISED HINDI — folded to Devanagari before embedding");
+console.log("ROMANISED HINDI - folded to Devanagari before embedding");
 console.log("=".repeat(70));
 
 /*
@@ -252,7 +252,7 @@ const FOLD: Array<[string, boolean, string | null]> = [
   ["corporation ka matlab kya hai", true, "corporation का मतलब क्या है"],
   ["bone scan kya hota hai", true, "bone scan क्या होता है"],
   ["photosynthesis kaise hota hai", true, "photosynthesis कैसे होता है"],
-  // request scaffolding is dropped rather than transliterated: "मुझे … बताइए"
+  // request scaffolding is dropped rather than transliterated: "मुझे ... बताइए"
   // embeds toward first-person narrative passages.
   ["mujhe corporation ke bare mein bataiye", true, "corporation के बारे में"],
 
@@ -273,20 +273,20 @@ for (const [input, shouldFold, expected] of FOLD) {
               `${JSON.stringify(got)}${ok ? "" : ` expected ${JSON.stringify(expected ?? input)}`}`);
 }
 
-// -- gate 3a — citations must point at excerpts that exist -------------------
+// -- gate 3a - citations must point at excerpts that exist -------------------
 //
 // The model answers by calling a tool and naming the excerpts it used, which
 // makes the claim checkable. An index outside the supplied set means the answer
 // was composed rather than read, and its prose can still overlap the real
 // passages well enough to pass the coverage test underneath.
 console.log("\n" + "=".repeat(70));
-console.log("GATE 3a — fabricated citations");
+console.log("GATE 3a - fabricated citations");
 console.log("=".repeat(70));
 
 const CITE: Array<[number[], number, boolean, string]> = [
   [[1, 2], 3, true,  "cites excerpts that exist"],
   [[3], 3, true,      "cites the last excerpt"],
-  [[], 3, true,       "no citations — degrades to checking against all, not a failure"],
+  [[], 3, true,       "no citations - degrades to checking against all, not a failure"],
   [[4], 3, false,     "REJECTED: cites excerpt 4 of 3"],
   [[0], 3, false,     "REJECTED: indices are 1-based, 0 is not an excerpt"],
   [[-1], 3, false,    "REJECTED: negative index"],
@@ -305,10 +305,10 @@ for (const [cited, avail, shouldPass, label] of CITE) {
 // Once the answer is a tool call, its text arrives as fragments of JSON that is
 // not valid yet. This is what keeps it streaming word by word instead of
 // landing all at once when the call closes. A bug here is visible as garbled
-// text on screen — backslash-u, half a Devanagari codepoint — so the escape
+// text on screen - backslash-u, half a Devanagari codepoint - so the escape
 // cases matter as much as the happy path.
 console.log("\n" + "=".repeat(70));
-console.log("STREAMING — answer text out of incomplete JSON");
+console.log("STREAMING - answer text out of incomplete JSON");
 console.log("=".repeat(70));
 
 const PARTIAL: Array<[string, string, string]> = [

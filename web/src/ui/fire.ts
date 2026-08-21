@@ -1,31 +1,25 @@
 /**
- * The fireball.
+ * The fireball. A fragment shader, not a blurred radial gradient.
  *
- * A fragment shader rather than a radial gradient with a blur, because what
- * makes fire legible is structure — turbulent filaments that curl, rise and burn
- * out — and a gradient has no structure at any scale. Three things do the work:
+ * What makes fire legible is structure, and a gradient has none at any scale.
+ * Three things carry it:
  *
- *   1. Turbulence, not smooth noise. `sum |noise|` over successive octaves
- *      leaves creases where the noise crosses zero, and those creases read as
- *      flame filaments. Ordinary fbm reads as cloud.
+ *   1. Turbulence rather than smooth noise. `sum |noise|` over octaves leaves
+ *      creases where the noise crosses zero, and those read as filaments.
+ *      Plain fbm reads as cloud.
+ *   2. Domain warping: the turbulence is sampled at a position itself
+ *      displaced by noise, so filaments curl and shear instead of scrolling.
+ *   3. A blackbody-ish ramp. Flame runs red -> orange -> amber -> white over a
+ *      narrow temperature range, so hue and brightness move together. Fixed hue
+ *      with varying alpha reads as cellophane.
  *
- *   2. Domain warping. The turbulence is sampled at a position itself displaced
- *      by noise, which makes filaments curl and shear rather than scroll past.
+ * The sphere is a density field, not lit geometry: inside the radius it is
+ * sampled on an implicit sphere so convection wraps and rotates with it,
+ * outside it continues on the equator plane so the corona is the same fire
+ * escaping rather than a glow sprite.
  *
- *   3. A blackbody-ish ramp. Real flame runs deep red -> orange -> amber ->
- *      white over a narrow temperature range, so brightness and hue move
- *      together; a fixed hue with varying alpha reads as cellophane.
- *
- * The sphere is a density field rather than lit geometry. Inside the radius the
- * field is sampled on the surface of an implicit sphere, so convection cells
- * wrap around it and rotate with it; outside, the same field continues on the
- * equator plane, so the corona is the same fire escaping rather than a glow
- * sprite pasted around the edge.
- *
- * This module carries no DOM or worker specifics, so the same code runs on both
- * sides of the `OffscreenCanvas` boundary: in a worker where the browser allows
- * it (see `fire.worker.ts`), in-thread and paused during measured queries where
- * it does not.
+ * No DOM or worker specifics here, so the same code runs on both sides of the
+ * OffscreenCanvas boundary (see `fire.worker.ts`).
  */
 
 export type FireState =
@@ -40,9 +34,9 @@ export type FireState =
 /** Everything the renderer needs to know, in one flat message-safe object. */
 export interface FireInput {
   state: FireState;
-  /** 0..1 — index load progress; drives the charge ring while dormant. */
+  /** 0..1 - index load progress; drives the charge ring while dormant. */
   charge: number;
-  /** 0..1 — microphone amplitude while listening, playback envelope while speaking. */
+  /** 0..1 - microphone amplitude while listening, playback envelope while speaking. */
   amp: number;
 }
 
@@ -51,7 +45,7 @@ in vec2 p;
 void main(){ gl_Position = vec4(p, 0.0, 1.0); }`;
 
 /**
- * One full-screen pass. Everything is procedural — no textures, so there is
+ * One full-screen pass. Everything is procedural - no textures, so there is
  * nothing to upload and the first frame is as cheap as the thousandth.
  */
 const FRAG = `#version 300 es
@@ -94,7 +88,7 @@ float gnoise(vec3 p){
                      dot(hash33(i + vec3(1,1,1)), f - vec3(1,1,1)), u.x), u.y), u.z);
 }
 
-/* Smooth fbm — used only for the warp field, where creases would be wrong. */
+/* Smooth fbm - used only for the warp field, where creases would be wrong. */
 float fbm(vec3 p){
   float a = 0.5, s = 0.0;
   for(int i = 0; i < 4; i++){ s += a * gnoise(p); p *= 2.03; a *= 0.5; }
@@ -173,7 +167,7 @@ void main(){
 
      Load-bearing rather than tidying. The turbulence term is a signed field with
      a positive mean, so ungated it lifts every pixel on the canvas slightly
-     above zero — a faint haze to the corners. The haze is invisible alone, but
+     above zero - a faint haze to the corners. The haze is invisible alone, but
      the alpha feather cuts it at a fixed radius and the cut reads as a hard
      circular outline. This makes the fire absent rather than clipped. */
   float env = clamp(body + halo * 0.55 + lick * 0.6, 0.0, 1.0);
@@ -294,7 +288,7 @@ export class FireRenderer {
     const gl = canvas.getContext("webgl2", {
       alpha: true,
       premultipliedAlpha: true,
-      antialias: false,          // full-screen procedural pass — MSAA buys nothing
+      antialias: false,          // full-screen procedural pass - MSAA buys nothing
       depth: false,
       stencil: false,
       powerPreference: "low-power",
@@ -396,7 +390,7 @@ export class FireRenderer {
     //
     // Snapped to zero at the bottom of the fade rather than left to asymptote.
     // An exponential approach never reaches its target, and the loop stops
-    // outright when the tab is hidden — so a tab switched away mid-fade would
+    // outright when the tab is hidden - so a tab switched away mid-fade would
     // freeze on a faint stale ring around a fire that finished loading.
     const ringTarget = this.state === "dormant" && this.charge < 0.999 ? 1 : 0;
     this.ring += (ringTarget - this.ring) * (1 - Math.exp(-dt * 8));

@@ -1,32 +1,25 @@
 /**
  * Answers generated ahead of time for the shipped corpus.
  *
- * Retrieval runs in the browser and finishes in about 4 ms. Writing the answer
- * is a network round trip to a model and takes about 540 ms, so on the shipped
- * corpus — which never changes — that hop is being paid over and over for a
- * question that was already answered once. `bench/precompute.ts` answers the
- * corpus offline and this reads the result back.
+ * Retrieval takes a couple of ms in the browser; writing the answer is a
+ * round trip to a model. The shipped corpus never changes, so that hop is
+ * being paid again for questions already answered once. `bench/precompute.ts`
+ * answers them offline and this reads the result back.
  *
- * WHAT THIS DOES NOT CHANGE. Retrieval still runs in full, and the latency
- * figure under each answer still measures it. A hit here replaces the
- * *generation* hop only, so the 200 ms guarantee describes exactly what it did
- * before — and because it is generation that is skipped, the message carries no
- * generation figure at all. It says "written ahead" where a live answer reports
- * its milliseconds, so a stored answer is never mistaken for a fast model.
+ * Retrieval still runs in full either way, and the latency figure under each
+ * answer still measures it. A hit here skips generation only, so the message
+ * says "written ahead" rather than reporting a generation time that never
+ * elapsed.
  *
- * TWO CONDITIONS, BOTH REQUIRED. A stored answer is used only when
+ * A stored answer is used only when both hold:
  *
- *   1. the query vector is within `MIN_SIMILARITY` of a stored one, and
- *   2. the passage retrieval just ranked first is one the stored answer was
- *      actually written from.
+ *   1. the query vector is within MIN_SIMILARITY of a stored one, and
+ *   2. the passage retrieval just ranked first is one it was written from.
  *
- * The second is what makes this safe. Cosine alone cannot tell "what is a
- * corporation" from "what is a corporation tax", and serving a confident answer
- * to the wrong question is worse than paying for the round trip. Requiring the
- * evidence to agree means a near-miss on the vector still has to land on the
- * same passage, and it also handles the case that breaks every naive answer
- * cache: once the user adds their own sources, retrieval returns different
- * passages and the stored answer is stale by definition.
+ * The second is what makes it safe. Cosine alone cannot separate "what is a
+ * corporation" from "what is a corporation tax", and it also covers the case
+ * that breaks every naive answer cache: once the user adds sources, retrieval
+ * returns different passages and the stored answer is stale by definition.
  */
 
 import { PassageRescorer } from "../retrieval/ivf";
@@ -56,7 +49,7 @@ interface Entry {
  * Cosine floor for a match.
  *
  * Deliberately high. The passage guard below carries most of the safety, so
- * this only has to exclude questions that are merely on the same topic — and
+ * this only has to exclude questions that are merely on the same topic - and
  * on this corpus two unrelated questions about corporations sit around 0.85,
  * which is well inside the range a looser floor would admit.
  */
@@ -125,7 +118,7 @@ export class PrecomputedAnswers {
  *
  * Absence is a supported state rather than an error: the app falls back to
  * generating live, which is what it did before any of this existed. A store
- * built against a different index is also treated as absent — passage ordinals
+ * built against a different index is also treated as absent - passage ordinals
  * are positional, so replaying them against a rebuilt index would attach
  * answers to whatever now sits at that offset.
  */
@@ -146,7 +139,7 @@ export async function loadPrecomputed(
   if (manifest.indexBuiltAt !== indexBuiltAt || manifest.dim !== dim) {
     console.warn(
       `[chehrag] precomputed answers were built against a different index ` +
-      `(${manifest.indexBuiltAt} vs ${indexBuiltAt}) — ignoring them and ` +
+      `(${manifest.indexBuiltAt} vs ${indexBuiltAt}) - ignoring them and ` +
       `generating live. Re-run bench/precompute.ts to rebuild.`,
     );
     return null;

@@ -9,7 +9,7 @@
  *   - cancellable, because a 400-page PDF is minutes of work
  *   - persisted, so it happens exactly once per document
  *
- * Persistence stores the quantised form — binary codes and int8 vectors — not
+ * Persistence stores the quantised form - binary codes and int8 vectors - not
  * the float embeddings: 32x smaller for the codes, 4x for the passage vectors,
  * and exactly what search needs, so a reload replays straight into the index.
  */
@@ -64,7 +64,7 @@ interface StoredSource {
   codeWords: number;
   passageText: string[];
   codes: ArrayBuffer;        // Uint32Array, chunks * codeWords
-  chunkParent: ArrayBuffer;  // Int32Array, chunks — LOCAL passage index
+  chunkParent: ArrayBuffer;  // Int32Array, chunks - LOCAL passage index
   chunkStrategy: ArrayBuffer;// Uint8Array, chunks
   p8: ArrayBuffer;           // Int8Array, passages * dim
   pScale: ArrayBuffer;       // Float32Array, passages
@@ -136,7 +136,7 @@ export class SourceStore {
    * is enabled, so the corpus-only path pays nothing for this.
    *
    * `tokens` adds the lexical bucket. Optional so a caller with only a vector
-   * still gets the six dense strategies rather than an error — but the app
+   * still gets the six dense strategies rather than an error - but the app
    * always passes them, because on a user's own document the exact-token match
    * is usually the whole question.
    */
@@ -218,7 +218,7 @@ export class SourceStore {
       chunks = chunks.slice(0, MAX_CHUNKS_PER_SOURCE);
       const lastParent = chunks[chunks.length - 1].parent;
       passages.length = lastParent + 1;
-      src.note = `first ${passages.length} passages — the rest was too large to index`;
+      src.note = `first ${passages.length} passages - the rest was too large to index`;
     }
 
     const { dim, codeWords } = this.deps;
@@ -340,7 +340,7 @@ export class SourceStore {
       });
       return this.db;
     } catch {
-      return null;   // private mode — sources work, they just don't survive reload
+      return null;   // private mode - sources work, they just don't survive reload
     }
   }
 
@@ -402,7 +402,7 @@ export class SourceStore {
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
-    } catch { /* quota exceeded — the source still works this session */ }
+    } catch { /* quota exceeded - the source still works this session */ }
   }
 
   private async forget(id: number): Promise<void> {

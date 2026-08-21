@@ -1,8 +1,8 @@
-"""BM25 lexical index — the fourth axis from `chunking/strategies.py`.
+"""BM25 lexical index - the fourth axis from `chunking/strategies.py`.
 
 The other six indices all change *what* gets embedded. This one changes the
 matching rule: it does not embed anything at all. Same unit as the `whole`
-strategy — one entry per passage — scored by term statistics instead of by
+strategy - one entry per passage - scored by term statistics instead of by
 cosine over a learned vector.
 
 It is here because dense retrieval has one well-known blind spot and this corpus
@@ -10,7 +10,7 @@ is full of it. A 384-dimension vector averaged over a passage cannot hold an
 exact token: a year, a price, a drug name, an acronym transliterated into
 Devanagari. 25% of MSMARCO-XI's queries are NUMERIC-type. The `contextual`
 strategy already tries to help by hoisting numbers and Latin runs into a header,
-but that is still the same lossy averaging — it makes the numbers *more present*
+but that is still the same lossy averaging - it makes the numbers *more present*
 in the vector, not exact. BM25 matches them exactly or not at all.
 
 The two failure modes are close to complementary, which is the whole argument
@@ -18,7 +18,7 @@ for fusing them rather than choosing:
 
     dense wins   paraphrase, cross-lingual, synonymy, "what is a corporation"
                  against a passage that never says "corporation"
-    BM25 wins    rare exact tokens — "1947", "NATO", "एचआईवी", a surname
+    BM25 wins    rare exact tokens - "1947", "NATO", "एचआईवी", a surname
 
 What this costs, and how it is kept small:
 
@@ -43,8 +43,8 @@ into a precomputed impact, so k1 and b can be re-tuned against the eval without
 rebuilding the index.
 
 Tokenisation is a deliberate port of `web/src/retrieval/tokens.ts`. If the two
-disagree the index is silently wrong — the query would be looking up terms that
-were never indexed under that spelling — so `bench/lexparity.ts` asserts the two
+disagree the index is silently wrong - the query would be looking up terms that
+were never indexed under that spelling - so `bench/lexparity.ts` asserts the two
 implementations agree token for token and hash for hash.
 """
 
@@ -110,7 +110,7 @@ def _is_stopword(w: str) -> bool:
         return w in EN_STOP
     if _HAS_DEVANAGARI.search(w):
         return w in HI_STOP
-    return False                       # script with no list — never filtered
+    return False                       # script with no list - never filtered
 
 
 def content_tokens(s: str) -> list[str]:
@@ -118,7 +118,7 @@ def content_tokens(s: str) -> list[str]:
 
     Duplicates matter here and do not in `tokens.ts`: that returns a set because
     gate 2 asks "was this word present", where BM25 asks "how often". The
-    fallback to unfiltered tokens is the same in both — a string of nothing but
+    fallback to unfiltered tokens is the same in both - a string of nothing but
     function words names no subject, and an empty token list would make every
     passage score zero.
     """
@@ -139,7 +139,7 @@ def fnv1a64(s: str) -> int:
 
     Chosen over anything stronger because it is four lines in both languages and
     has no endianness or block-padding behaviour to get subtly wrong across an
-    implementation boundary. The hash is not adversarial input here — it indexes
+    implementation boundary. The hash is not adversarial input here - it indexes
     a fixed corpus we built ourselves.
     """
     h = _FNV64_OFFSET
@@ -212,7 +212,7 @@ def build(passages: list[str], df_max_ratio: float = 0.15,
 
     dup = int((np.diff(hashes[hsort]) == 0).sum())
     if dup and verbose:
-        print(f"  !! {dup} hash collisions — postings for those terms merge")
+        print(f"  !! {dup} hash collisions - postings for those terms merge")
 
     # Postings reordered to follow the hash-sorted dictionary.
     starts, ends = offsets[:-1][hsort], offsets[1:][hsort]
@@ -253,7 +253,7 @@ def main() -> None:
     ap.add_argument("--k1", type=float, default=1.2)
     ap.add_argument("--b", type=float, default=0.75)
     ap.add_argument("--parity-out", default="/tmp/lexparity.json",
-                    help="fixture for bench/lexparity.ts — tokens and hashes "
+                    help="fixture for bench/lexparity.ts - tokens and hashes "
                          "this build produced, for the browser to reproduce")
     args = ap.parse_args()
 

@@ -38,8 +38,8 @@ export interface Stage<I, O> {
   /** Extra attempts after the first. Only meaningful for non-deterministic work. */
   retries?: number;
   /**
-   * FAIL    — this stage is load-bearing; abort the run.
-   * DEGRADE — recoverable; use `fallback` and carry on.
+   * FAIL    - this stage is load-bearing; abort the run.
+   * DEGRADE - recoverable; use `fallback` and carry on.
    */
   onError?: "FAIL" | "DEGRADE";
   /** Required when onError is DEGRADE. */
@@ -59,8 +59,8 @@ export class StageError extends Error {
 /**
  * A stage that ran out of budget, as distinct from one that failed.
  *
- * The distinction drives the retry policy. A transient fault — an ONNX session
- * failing under memory pressure — is worth retrying. A timeout on deterministic
+ * The distinction drives the retry policy. A transient fault - an ONNX session
+ * failing under memory pressure - is worth retrying. A timeout on deterministic
  * work is not: the stage was given a fixed amount of work that did not fit, and
  * a second attempt overruns identically at double the price.
  */
@@ -230,7 +230,7 @@ export class CircuitBreaker {
   }
 
   async call<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.isOpen) throw new Error("circuit open — dependency unhealthy");
+    if (this.isOpen) throw new Error("circuit open - dependency unhealthy");
     try {
       const v = await fn();
       this.failures = 0;

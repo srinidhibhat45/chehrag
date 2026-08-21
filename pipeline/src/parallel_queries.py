@@ -2,7 +2,7 @@
 
 MSMARCO-XI is the *same* MS MARCO queries translated into 14 Indic languages, so
 `query_id` is a join key across language files. That means we don't have to
-translate anything ourselves — the parallel corpus already exists, and machine
+translate anything ourselves - the parallel corpus already exists, and machine
 translation of our own would put translation error inside the thing we're
 measuring.
 
@@ -52,7 +52,7 @@ def main() -> None:
     ap.add_argument("--wanted", default="data/subset/queries.hin.jsonl",
                     help="query ids we already have gold passages for")
     ap.add_argument("--corpus", default="data/subset/corpus.hin.jsonl",
-                    help="passage order — line number IS the browser ordinal")
+                    help="passage order - line number IS the browser ordinal")
     ap.add_argument("--out", default="../web/bench/data/multilingual.json")
     ap.add_argument("--n", type=int, default=120, help="how many parallel query sets")
     ap.add_argument("--row-groups", type=int, default=6,
@@ -111,7 +111,7 @@ def main() -> None:
             hit += 1
         print(f"  {code:>3} {endonym:<10} {len(qids):>7,} rows read, {hit:>5,} join")
 
-    # Keep only query ids present in EVERY language we managed to read, so each
+    # Keep only query ids present in every language we managed to read, so each
     # row of the stress test is a genuine like-for-like comparison.
     got = sorted({c for m in rows.values() for c in m})
     full = [q for q, m in rows.items() if len(m) == len(got)]
@@ -147,7 +147,7 @@ def main() -> None:
     dest = Path(args.out)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print(f"wrote {dest} — {len(out)} parallel sets x {len(got)} languages")
+    print(f"wrote {dest} - {len(out)} parallel sets x {len(got)} languages")
 
 
 if __name__ == "__main__":

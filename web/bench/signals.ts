@@ -33,7 +33,7 @@ const engine = new RagEngine(index, enc, {
   thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0,
                 rescueMinScore: Infinity, rescueMinOverlap: 1 },
 });
-// The engine ships with the corpus off — the app starts empty so that an
+// The engine ships with the corpus off - the app starts empty so that an
 // answer can only have come from what the user added. Every benchmark here
 // exists to measure that corpus, so it opts in explicitly.
 engine.setCorpusEnabled(true);
@@ -80,7 +80,7 @@ console.log("=".repeat(70));
 console.log(`SIGNAL SEPARABILITY  (n=${rows.length}, ` +
             `${isAns.filter(Boolean).length} answerable / ${isAns.filter((x) => !x).length} unanswerable)`);
 console.log("=".repeat(70));
-console.log("AUC — probability a random answerable query scores above a random unanswerable one");
+console.log("AUC - probability a random answerable query scores above a random unanswerable one");
 console.log("  1.00 = perfect separation, 0.50 = no signal at all\n");
 for (const [name, get] of [
   ["topScore", (r: Row) => r.top],

@@ -1,38 +1,25 @@
 /**
- * The multilingual stress test.
+ * Cross-lingual stress test: the same question in 15 languages.
  *
- * The corpus is Hindi. The embedder (`multilingual-e5-small`) is not — it maps
- * 100 languages into one shared space, which is a claim, and claims about
- * retrieval quality are worth exactly what they were measured at. So this asks
- * the same question in fourteen Indian languages plus English and checks
- * whether each one still lands on the passage the Hindi question lands on.
+ * The corpus is Hindi, the embedder is not, so "it retrieves cross-lingually"
+ * is a claim that needs a number against it.
  *
- * ── why the queries are not translated by us ──────────────────────────────
- * MSMARCO-XI is one set of MS MARCO queries professionally translated into
- * fourteen languages, keyed by `query_id`. Joining on that key gives genuine
- * parallel text. Machine-translating our own would put translation error inside
- * the measurement and we would have no way to separate "the retriever failed"
- * from "the translation was bad" — the two failures look identical in the
- * output. `pipeline/src/parallel_queries.py` builds the join.
+ * The queries are MSMARCO-XI's own professional translations, joined on
+ * `query_id` by `pipeline/src/parallel_queries.py`. Translating them ourselves
+ * would fold translation error into the measurement, where it is
+ * indistinguishable from retrieval error.
  *
- * ── what is actually measured, and why it is two numbers ─────────────────
- * Every query is scored twice, and keeping them apart is the whole point:
+ * Two numbers per language, because they fail for different reasons:
  *
- *   **hit@k** — did retrieval rank the gold passage? This is the cross-lingual
- *   question. It is measured from `RagAnswer.retrieved`, which is populated
- *   even when the answer was refused.
+ *   hit@k     did retrieval rank the gold passage? Read from
+ *             `RagAnswer.retrieved`, which is populated even on a refusal.
+ *   answered  did the guardrails let it through? The threshold is calibrated
+ *             on Hindi, so a language sitting at lower cosine gets refused more
+ *             often while still ranking correctly. One number would hide that,
+ *             and hide it flatteringly.
  *
- *   **answered** — did the guardrails let it through? A language can score well
- *   on hit@k and badly here, and that is not a retrieval failure: the
- *   confidence threshold was calibrated on Hindi, so a language whose
- *   embeddings sit at systematically lower cosine will be refused more often
- *   *while still ranking correctly*. Reporting one number would hide that
- *   entirely, and hide it in the flattering direction.
- *
- * Latency is reported per language because it is not constant across them.
- * Tokenisation is: scripts with heavier grapheme clusters produce more tokens
- * for the same sentence, and the embedding forward pass is the dominant term in
- * the budget.
+ * Latency is per language too: heavier grapheme clusters make more tokens for
+ * the same sentence, and the forward pass dominates the budget.
  */
 
 import type { RagAnswer } from "../harness/rag";
@@ -71,13 +58,13 @@ export interface LangResult {
   answered: number;
   /** Share over the 200 ms requirement. Expected to be zero. */
   overBudget: number;
-  /** Mean confidence on answered queries — the number the gate thresholds. */
+  /** Mean confidence on answered queries - the number the gate thresholds. */
   meanConfidence: number;
 }
 
 export interface MultilingualReport {
   perLang: LangResult[];
-  /** Every language, pooled — the headline latency claim. */
+  /** Every language, pooled - the headline latency claim. */
   overall: { n: number; p50: number; p70: number; p100: number; overBudget: number };
   /** hit@5 of the corpus's own language, as the ceiling everything else is read against. */
   baselineHit5: number;
@@ -94,11 +81,11 @@ export const ENGLISH: LangSpec = { code: "eng", name: "English", tag: "en-IN" };
  * browser this loop must yield to let the UI paint, and yielding per query
  * would add scheduler noise to the very timings being collected.
  *
- * The yield happens immediately *after* the progress callback and before any
+ * The yield happens immediately after the progress callback and before any
  * timing starts, which is not incidental. `totalMs` is measured on the main
  * thread across an `await` on the encoder worker, so anything the browser
- * decides to do during that await — including painting the progress line this
- * function just wrote — is counted as query time. Measured: with the progress
+ * decides to do during that await - including painting the progress line this
+ * function just wrote - is counted as query time. Measured: with the progress
  * update left to paint whenever it liked, the in-browser sweep reported a P100
  * of 122 ms against 13 ms for the identical queries run without it. The
  * reporting UI was nine tenths of the number it was reporting.
@@ -114,7 +101,7 @@ export async function runMultilingual(
     /**
      * Awaited after each progress update, before that language's queries are
      * timed. A browser caller should wait for a frame here, not just a
-     * macrotask — see the note above on what a stray paint does to `totalMs`.
+     * macrotask - see the note above on what a stray paint does to `totalMs`.
      */
     yieldFn?: () => Promise<void>;
   } = {},
@@ -140,7 +127,7 @@ export async function runMultilingual(
       if (!text) continue;
 
       // `skipCache` is not optional here. The same query id appears once per
-      // language, but repeated *runs* of the sweep would otherwise be timing
+      // language, but repeated runs of the sweep would otherwise be timing
       // the cache rather than the pipeline.
       const r = await ask(text);
       times.push(r.totalMs);
@@ -186,7 +173,7 @@ export function percentiles(xs: number[]): {
 } {
   if (!xs.length) return { p50: 0, p70: 0, p95: 0, p100: 0, mean: 0 };
   const s = [...xs].sort((a, b) => a - b);
-  // Nearest-rank, not interpolated. P100 must be an observed measurement — an
+  // Nearest-rank, not interpolated. P100 must be an observed measurement - an
   // interpolated maximum is not a query anyone actually ran.
   const at = (q: number) => s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)];
   return {
@@ -201,7 +188,7 @@ export function formatReport(rep: MultilingualReport): string {
   const num = (v: number, n = 6, d = 2) => v.toFixed(d).padStart(n);
   const pct = (v: number) => `${(v * 100).toFixed(1).padStart(5)}%`;
 
-  let s = "MULTILINGUAL STRESS TEST — same questions, 14 Indian languages + English\n";
+  let s = "MULTILINGUAL STRESS TEST - same questions, 14 Indian languages + English\n";
   s += "corpus is Hindi; every other row is cross-lingual retrieval into it\n";
   s += "-".repeat(74) + "\n";
   s += `${pad("language", 12)}${pad("n", 5)}${pad("p50", 8)}${pad("p100", 8)}` +

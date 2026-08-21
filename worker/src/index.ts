@@ -1,20 +1,17 @@
 /**
- * Cloudflare Worker — the only server-side component in the system.
+ * Cloudflare Worker. The only server-side component, and none of it is latency.
  *
- * It exists for what a browser is not permitted to do, none of it latency:
+ * It exists for what a browser cannot do:
+ *   - Sarvam wants an `api-subscription-key` header and browsers cannot set
+ *     headers on a WebSocket handshake, so the Worker terminates the browser
+ *     socket and opens an authenticated one upstream
+ *   - hold the TTS and generator keys
+ *   - read a cross-origin page body
  *
- *   1. Sarvam authenticates with an `api-subscription-key` header, and browsers
- *      cannot set custom headers on a WebSocket handshake. The Worker
- *      terminates the browser socket and opens an authenticated one upstream.
+ * With this down, voice and generated answers stop. Typed questions still
+ * answer at full speed, because retrieval is entirely client-side.
  *
- *   2. Answer synthesis, which runs after the extractive path has already met
- *      the 200ms budget.
- *
- * Nothing here is in the measured retrieval path. With this Worker down, voice
- * input and generated answers stop; typed questions still answer at full speed,
- * because retrieval is entirely client-side.
- *
- * Free tier: 100k requests/day. Deploy with `wrangler deploy`.
+ * Free tier: 100k requests/day. `wrangler deploy`.
  */
 
 import { synthesizeStream, resolveProvider, SSE_HEADERS, type Turn } from "./synthesize";
@@ -44,9 +41,9 @@ export interface Env {
  * A Worker opens an upstream WebSocket by `fetch()`ing an http(s) URL with
  * `Upgrade: websocket` and reading `response.webSocket` off the 101. The
  * runtime's fetch has no `wss:` scheme at all, and throws
- * `TypeError: Fetch API cannot load: wss://…` before a packet moves.
+ * `TypeError: Fetch API cannot load: wss://...` before a packet moves.
  *
- * The browser-facing URL is still `wss://…/stt/stream`; only this upstream hop
+ * The browser-facing URL is still `wss://.../stt/stream`; only this upstream hop
  * is spelled http.
  */
 const SARVAM_WS = "https://api.sarvam.ai/speech-to-text-realtime/ws";
@@ -54,15 +51,15 @@ const SARVAM_REST = "https://api.sarvam.ai/speech-to-text";
 const SARVAM_TTS = "https://api.sarvam.ai/text-to-speech";
 const ELEVEN_TTS = "https://api.elevenlabs.io/v1/text-to-speech";
 
-/** Rachel — a stock ElevenLabs voice, so the deploy needs no voice setup. */
+/** Rachel - a stock ElevenLabs voice, so the deploy needs no voice setup. */
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
 /**
  * CORS against a comma-separated allowlist.
  *
  * A list rather than a single value, because Cloudflare Pages gives every
- * project two live origins — `chehrag.pages.dev` and a per-deploy
- * `<hash>.chehrag.pages.dev` — and a visitor handed either should not meet a
+ * project two live origins - `chehrag.pages.dev` and a per-deploy
+ * `<hash>.chehrag.pages.dev` - and a visitor handed either should not meet a
  * CORS error. `*` remains available for local work and is wrong in production:
  * `/fetch-url` makes outbound requests, so an open policy lets any site use this
  * Worker as a proxy on your quota.
@@ -195,7 +192,7 @@ async function handleSttStream(req: Request, env: Env): Promise<Response> {
  * Which is a narrow set. A 429 or a 5xx is the provider having a moment; a
  * transport error is the network having one. A 4xx is this Worker having sent
  * something wrong, and sending it again produces the same 4xx while spending
- * the rate limit twice — so those return immediately.
+ * the rate limit twice - so those return immediately.
  *
  * Backoff is exponential and jittered. Without the jitter, every request that
  * hit one blip retries in the same millisecond and turns a provider's recovery
@@ -226,7 +223,7 @@ async function fetchWithRetry(
       // Drain, or the connection is held until it times out.
       await res.text().catch(() => "");
     } catch {
-      last = null;                    // transport failure — worth another go
+      last = null;                    // transport failure - worth another go
     }
   }
   return last ?? new Response(null, { status: 502 });
@@ -377,7 +374,7 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
 }
 
 /**
- * Answer synthesis — the generation half of the RAG loop.
+ * Answer synthesis - the generation half of the RAG loop.
  *
  * The browser retrieves and this generates; neither is the whole system alone.
  * Not on the 200 ms clock: retrieval carries the latency guarantee and is
@@ -458,7 +455,7 @@ function parseTranscript(raw: unknown): Turn[] {
  * Fetch a URL the user added as a source, and return it as plain text.
  *
  * The browser cannot do this: reading the body of an arbitrary cross-origin page
- * is what CORS forbids. Not on any latency path — a source is fetched once, when
+ * is what CORS forbids. Not on any latency path - a source is fetched once, when
  * it is added.
  *
  * It is the one endpoint that makes an outbound request to a user-supplied
@@ -594,7 +591,7 @@ async function handleFetchUrl(req: Request, env: Env, origin: string | null): Pr
 
 /**
  * Read a body with a hard byte ceiling. `content-length` is a claim rather than
- * a guarantee — absent, wrong or deliberately understated — so streaming and
+ * a guarantee - absent, wrong or deliberately understated - so streaming and
  * counting is the only form that bounds memory.
  */
 async function readCapped(res: Response, max: number): Promise<string | null> {

@@ -28,10 +28,10 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE/")
 H=$(curl -s -D - -o /dev/null --max-time 20 "$SITE/")
 echo "$H" | grep -qi 'cross-origin-opener-policy: same-origin' \
   && ok "COOP header present" \
-  || bad "COOP missing — threaded WASM will be disabled and queries ~3x slower"
+  || bad "COOP missing - threaded WASM will be disabled and queries ~3x slower"
 echo "$H" | grep -qi 'cross-origin-embedder-policy: credentialless' \
   && ok "COEP header present" \
-  || bad "COEP missing — threaded WASM will be disabled and queries ~3x slower"
+  || bad "COEP missing - threaded WASM will be disabled and queries ~3x slower"
 
 # --- the index is actually served --------------------------------------------
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE/index/manifest.json")
@@ -44,13 +44,13 @@ read -r code bytes < <(curl -s -o /dev/null -w '%{http_code} %{size_download}' -
 # --- passage text is compressed ----------------------------------------------
 enc=$(curl -s -o /dev/null -D - --max-time 30 -H 'accept-encoding: gzip, br' "$SITE/index/passages.000.json" | grep -i '^content-encoding:' | tr -d '\r' | awk '{print $2}')
 if [ -n "$enc" ]; then ok "passage text served as $enc (74 MB of JSON → ~14 MB over the wire)"
-else warn "passage text is NOT compressed — first load will be ~60 MB heavier than it needs to be"; fi
+else warn "passage text is NOT compressed - first load will be ~60 MB heavier than it needs to be"; fi
 
 # --- the Worker --------------------------------------------------------------
 HEALTH=$(curl -s --max-time 20 "$WORKER/health")
 echo "$HEALTH" | grep -q '"ok":true' && ok "worker healthy" || bad "worker /health: $HEALTH"
-echo "$HEALTH" | grep -q '"llm":true'          && ok "generator configured" || bad "no generator — answers will be quoted passages"
-echo "$HEALTH" | grep -q '"sarvam":true'       && ok "Sarvam configured"    || warn "Sarvam not configured — voice falls back to the browser"
+echo "$HEALTH" | grep -q '"llm":true'          && ok "generator configured" || bad "no generator - answers will be quoted passages"
+echo "$HEALTH" | grep -q '"sarvam":true'       && ok "Sarvam configured"    || warn "Sarvam not configured - voice falls back to the browser"
 
 # --- a real generated answer, end to end -------------------------------------
 OUT=$(curl -sN --max-time 45 -X POST "$WORKER/synthesize" \
@@ -66,9 +66,9 @@ for line in sys.stdin:
         except Exception: continue
         if 't' in e: out += e['t']
 print(out.strip())" 2>/dev/null)
-if [ -n "$OUT" ]; then ok "live cross-lingual answer: \"$(echo "$OUT" | head -c 70)…\""
+if [ -n "$OUT" ]; then ok "live cross-lingual answer: \"$(echo "$OUT" | head -c 70)...\""
 else bad "generation returned nothing"; fi
 
 echo
-if [ "$FAILED" = 1 ]; then echo "  ${red}deployment has problems — see above.${off}"; exit 1; fi
+if [ "$FAILED" = 1 ]; then echo "  ${red}deployment has problems - see above.${off}"; exit 1; fi
 echo "  ${grn}deployment verified.${off}"

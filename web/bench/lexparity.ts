@@ -7,7 +7,7 @@
  * the two FNV implementations diverge on one byte, every lookup misses, the
  * lexical index returns nothing, and fusion carries on with six strategies
  * instead of seven. Nothing errors. The only visible symptom is a quality
- * number slightly lower than it should be — which is indistinguishable from
+ * number slightly lower than it should be - which is indistinguishable from
  * BM25 simply not helping much, the exact question the ablation is trying to
  * answer.
  *
@@ -21,7 +21,7 @@ import { fnv1a64 } from "../src/retrieval/lexical";
 const FIXTURE = process.env.LEXPARITY ?? "/tmp/lexparity.json";
 
 if (!existsSync(FIXTURE)) {
-  console.error(`missing ${FIXTURE} — run: cd pipeline && .venv/bin/python src/lexical.py`);
+  console.error(`missing ${FIXTURE} - run: cd pipeline && .venv/bin/python src/lexical.py`);
   process.exit(1);
 }
 
@@ -44,9 +44,9 @@ for (const c of cases) {
     tokenFails++;
     if (examples.length < 5) {
       examples.push(
-        `  "${c.text.slice(0, 48)}…"\n` +
-        `    python-only: ${missing.slice(0, 6).join(", ") || "—"}\n` +
-        `    js-only    : ${extra.slice(0, 6).join(", ") || "—"}`);
+        `  "${c.text.slice(0, 48)}..."\n` +
+        `    python-only: ${missing.slice(0, 6).join(", ") || "-"}\n` +
+        `    js-only    : ${extra.slice(0, 6).join(", ") || "-"}`);
     }
   }
 
@@ -75,6 +75,6 @@ if (examples.length) console.log(`\n${examples.join("\n")}`);
 
 const ok = tokenFails === 0 && hashFails === 0;
 console.log(ok
-  ? "\nPASS — the browser looks up exactly the terms the builder indexed"
-  : "\nFAIL — lookups would silently miss; the lexical index would return nothing");
+  ? "\nPASS - the browser looks up exactly the terms the builder indexed"
+  : "\nFAIL - lookups would silently miss; the lexical index would return nothing");
 if (!ok) process.exit(1);

@@ -1,21 +1,17 @@
 /**
- * Speech-to-text, behind one interface.
+ * Speech-to-text behind one interface.
  *
- * Sarvam is the primary implementation and the only one used when a key is
- * configured. `WebSpeechStt` exists so that a deployment without a key still
- * demonstrates voice rather than showing a button that does nothing.
- *
- * It is never silently substituted: `pickStt` reports which engine it chose and
- * the UI names it, because "voice works" and "the Sarvam integration works" are
+ * Sarvam is the implementation, and the only one used when a key is set.
+ * `WebSpeechStt` is there so a keyless deployment still demonstrates voice
+ * instead of showing a dead button. `pickStt` reports which one it chose and
+ * the UI names it: "voice works" and "the Sarvam integration works" are
  * different claims.
  *
- * Two differences the UI has to account for:
- *
- *   - Web Speech has no meaningful language auto-detect. It is told a language
- *     and hears that language, where Sarvam's `auto` identifies one of eleven
- *     and returns it with the transcript.
- *   - Web Speech is Chromium-only in practice, and on Chrome the audio goes to
- *     Google's servers — which is why it is a labelled fallback.
+ * Two differences the UI has to handle:
+ *   - Web Speech has no real language auto-detect. It is told a language and
+ *     hears that one; Sarvam's `auto` identifies one of eleven and returns it.
+ *   - Web Speech is Chromium-only in practice and sends audio to Google, which
+ *     is why it is labelled.
  */
 
 import { SarvamStt, type SttEvent, type SttOptions } from "./sarvam";

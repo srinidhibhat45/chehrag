@@ -40,7 +40,7 @@ WHO="$(npx wrangler whoami 2>&1)"
 if echo "$WHO" | grep -q "not authenticated"; then
   die "not logged in to Cloudflare.
 
-  ${bold}Run this once, in your own terminal${off} — it opens a browser and takes ~20 seconds:
+  ${bold}Run this once, in your own terminal${off} - it opens a browser and takes ~20 seconds:
 
       ${bold}npx wrangler login${off}
 
@@ -55,15 +55,15 @@ ok "Cloudflare authenticated${ACCOUNT:+ as $ACCOUNT}"
 GROQ="$(read_key web/.env.local GROQ_API_KEY)"
 SARVAM="$(read_key worker/.dev.vars SARVAM_API_KEY)"
 ELEVEN="$(read_key worker/.dev.vars ELEVENLABS_API_KEY)"
-[ -n "${GROQ:-}" ]   && ok "Groq key found"        || warn "no Groq key — the site will quote passages, not answer"
-[ -n "${SARVAM:-}" ] && ok "Sarvam key found"      || warn "no Sarvam key — voice input will fall back to the browser"
+[ -n "${GROQ:-}" ]   && ok "Groq key found"        || warn "no Groq key - the site will quote passages, not answer"
+[ -n "${SARVAM:-}" ] && ok "Sarvam key found"      || warn "no Sarvam key - voice input will fall back to the browser"
 [ -n "${ELEVEN:-}" ] && ok "ElevenLabs key found"  || true
 
 # The largest index blob sits close to the Pages per-file ceiling, and a rebuilt
 # index could cross it. Cheaper to fail here than halfway through an upload.
 BIG=$(find web/public/index -type f -exec stat -f "%z" {} + 2>/dev/null | sort -rn | head -1)
 if [ -n "${BIG:-}" ] && [ "$BIG" -ge 26214400 ]; then
-  die "an index blob is $(echo "scale=1; $BIG/1048576" | bc) MiB — Cloudflare Pages rejects files over 25 MiB."
+  die "an index blob is $(echo "scale=1; $BIG/1048576" | bc) MiB - Cloudflare Pages rejects files over 25 MiB."
 fi
 ok "largest index blob $(echo "scale=1; ${BIG:-0}/1048576" | bc) MiB, under the 25 MiB Pages limit"
 
@@ -89,7 +89,7 @@ put_secret GROQ_API_KEY       "${GROQ:-}"
 put_secret SARVAM_API_KEY     "${SARVAM:-}"
 put_secret ELEVENLABS_API_KEY "${ELEVEN:-}"
 
-echo "  ${dim}waiting for the Worker to pick up its secrets…${off}"
+echo "  ${dim}waiting for the Worker to pick up its secrets...${off}"
 for i in $(seq 1 10); do
   H="$(curl -s --max-time 10 "$WORKER_URL/health" 2>/dev/null)"
   echo "$H" | grep -q '"llm":true' && break
@@ -102,16 +102,16 @@ step "3 · building the site against $WORKER_URL"
 # Written to .env.production so it is picked up by `vite build` without
 # disturbing .env.local, which is what `npm run dev` reads.
 printf '# Written by scripts/deploy.sh. Points the built site at the deployed Worker.\nVITE_WORKER_BASE=%s\n' "$WORKER_URL" > web/.env.production
-npm run build >/dev/null 2>&1 || die "build failed — run 'npm run build' to see why"
+npm run build >/dev/null 2>&1 || die "build failed - run 'npm run build' to see why"
 ok "built ($(du -sh web/dist | cut -f1))"
 
 step "4 · uploading to Cloudflare Pages"
-# `wrangler pages deploy` does not create a missing project — it fails with a
+# `wrangler pages deploy` does not create a missing project - it fails with a
 # hint. Creating it up front is idempotent and turns a confusing failure
 # halfway through a 131 MB upload into a no-op.
 npx wrangler pages project create "$PROJECT" --production-branch main >/dev/null 2>&1 \
   && ok "created Pages project '$PROJECT'" || true
-echo "  ${dim}131 MB of index blobs — this is the slow step, give it a few minutes${off}"
+echo "  ${dim}131 MB of index blobs - this is the slow step, give it a few minutes${off}"
 PAGES_OUT="$(npx wrangler pages deploy web/dist --project-name "$PROJECT" --commit-dirty=true 2>&1)"
 echo "$PAGES_OUT" | tail -5 | sed 's/^/  /'
 SITE_URL="$(echo "$PAGES_OUT" | grep -oE 'https://[a-z0-9.-]+\.pages\.dev' | tail -1)"
@@ -124,7 +124,7 @@ step "5 · locking the Worker to that origin"
 # "*" lets any site on the internet use your Worker as a proxy.
 # `wrangler pages deploy` prints the per-deploy preview origin
 # (https://<hash>.chehrag.pages.dev). The stable production origin is that with
-# the leading label removed — but only when there IS a leading label, or
+# the leading label removed - but only when there IS a leading label, or
 # "https://chehrag.pages.dev" would be mangled into "https://pages.dev".
 PREVIEW_ORIGIN="$SITE_URL"
 if [ "$(echo "$SITE_URL" | tr '.' '\n' | wc -l | tr -d ' ')" -ge 4 ]; then
@@ -138,7 +138,7 @@ ORIGINS="$PROD_ORIGIN"
 if grep -q 'ALLOWED_ORIGIN = "\*"' worker/wrangler.toml; then
   perl -pi -e "s#ALLOWED_ORIGIN = \"\\*\"#ALLOWED_ORIGIN = \"$ORIGINS\"#" worker/wrangler.toml
   (cd worker && npx wrangler deploy >/dev/null 2>&1) && ok "ALLOWED_ORIGIN = $ORIGINS" \
-    || warn "redeploy failed — set ALLOWED_ORIGIN manually and redeploy"
+    || warn "redeploy failed - set ALLOWED_ORIGIN manually and redeploy"
 else
   ok "ALLOWED_ORIGIN already set"
 fi

@@ -1,7 +1,7 @@
 /**
  * Fit the guardrail-gate-2 confidence threshold on real data.
  *
- * The corpus ships 3,012 queries with NO relevant passage — genuine cases where
+ * The corpus ships 3,012 queries with NO relevant passage - genuine cases where
  * refusing is the correct behaviour. That makes "when should we decline?" an
  * empirical question rather than a vibe, so we answer it empirically.
  *
@@ -65,7 +65,7 @@ function loadFromDisk() {
 
 async function main() {
   if (!existsSync(join(INDEX_DIR, "manifest.json"))) {
-    console.error(`no index at ${INDEX_DIR} — build it first`);
+    console.error(`no index at ${INDEX_DIR} - build it first`);
     process.exit(1);
   }
   const index = loadFromDisk();
@@ -78,7 +78,7 @@ async function main() {
     thresholds: { minTopScore: -1, minAgreement: 0, minLexicalOverlap: 0,
                   rescueMinScore: Infinity, rescueMinOverlap: 1 },
   });
-  // The engine ships with the corpus off — the app starts empty so that an
+  // The engine ships with the corpus off - the app starts empty so that an
   // answer can only have come from what the user added. Every benchmark here
   // exists to measure that corpus, so it opts in explicitly.
   engine.setCorpusEnabled(true);
@@ -107,8 +107,8 @@ async function main() {
    * forms invite exactly the mix-up that produced nonsense numbers here once.
    *
    *   correctAbstain  refused & unanswerable   (TP)
-   *   overRefusal     refused & answerable     (FP — false alarm)
-   *   missedAbstain   answered & unanswerable  (FN — the dangerous one)
+   *   overRefusal     refused & answerable     (FP - false alarm)
+   *   missedAbstain   answered & unanswerable  (FN - the dangerous one)
    *   correctAnswer   answered & answerable    (TN)
    */
   function evaluate(rs: Row[], thr: number, minAgree: number) {
@@ -135,7 +135,7 @@ async function main() {
   const scores = rows.map((r) => r.score).filter((s) => s > -1).sort((a, b) => a - b);
   const lo = scores[0] ?? 0, hi = scores[scores.length - 1] ?? 1;
   console.log("=".repeat(74));
-  console.log("GUARDRAIL CALIBRATION — gate 2 (retrieval confidence)");
+  console.log("GUARDRAIL CALIBRATION - gate 2 (retrieval confidence)");
   console.log("=".repeat(74));
   console.log(`queries ${rows.length}  (calib ${calib.length} / holdout ${hold.length})`);
   console.log(`answerable ${rows.filter((r) => r.answerable).length}  ` +

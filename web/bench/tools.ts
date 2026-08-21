@@ -2,8 +2,8 @@
  * The tool-call harness, exercised against the real provider.
  *
  * The generation path is not prompt-in, text-out: the model answers by calling
- * a tool, names the excerpts it used, and may ask for one more search — which
- * the *client* executes, because the index is in the browser and the Worker
+ * a tool, names the excerpts it used, and may ask for one more search - which
+ * the client executes, because the index is in the browser and the Worker
  * holds nothing but an API key. That is several moving parts across a network,
  * and the failure modes are quiet ones: a provider that ignores tools, a model
  * that cites excerpt 7 of 3, a search that never converges.
@@ -16,7 +16,7 @@
  *   gate 3                                  what survived grounding
  *
  * It calls a paid API, so it defaults to a small sample and paces itself. The
- * numbers that matter here are proportions and failures, not latency — the
+ * numbers that matter here are proportions and failures, not latency - the
  * generator is off the measured path by construction.
  *
  *   npx tsx bench/tools.ts                 15 queries
@@ -70,10 +70,10 @@ function loadFromDisk() {
  * The loop, against a scripted provider.
  *
  * The live run below only exercises `search_corpus` if the model decides it
- * needs one, which on well-retrieved queries it correctly does not — so the
+ * needs one, which on well-retrieved queries it correctly does not - so the
  * most important path would go untested precisely when everything is working.
  * This scripts the provider instead: turn one asks for a search, turn two
- * answers citing an excerpt that only exists *because* the search ran.
+ * answers citing an excerpt that only exists because the search ran.
  *
  * It costs nothing, needs no key, and tests the part that is ours: the tool
  * dispatch, the transcript, the appended excerpts, and the bound on rounds.
@@ -127,11 +127,11 @@ async function scriptedLoopTest(): Promise<boolean> {
       out.kind === "answer" && out.cited.length === 1 && out.cited[0] === 2],
   ];
   console.log("=".repeat(72));
-  console.log("TOOL LOOP — scripted provider (no API calls)");
+  console.log("TOOL LOOP - scripted provider (no API calls)");
   console.log("=".repeat(72));
   for (const [label, ok] of checks) console.log(`${ok ? "  ok  " : "  FAIL"} ${label}`);
   const passed = checks.every(([, ok]) => ok);
-  console.log(passed ? "\nPASS — dispatch, transcript and citation indexing all hold\n"
+  console.log(passed ? "\nPASS - dispatch, transcript and citation indexing all hold\n"
                      : "\nFAIL\n");
   return passed;
 }
@@ -143,7 +143,7 @@ async function main() {
   const provider = resolveProvider(process.env as Record<string, string>)
     ?? resolveProvider(dotenv("../web/.env.local") ?? dotenv(".env.local") ?? {});
   if (!provider) {
-    console.error("no generator configured — put GROQ_API_KEY in web/.env.local");
+    console.error("no generator configured - put GROQ_API_KEY in web/.env.local");
     process.exit(1);
   }
 
@@ -153,7 +153,7 @@ async function main() {
   // The fitted threshold, as the app ships it. `DEFAULT_CONFIG` carries the
   // conservative placeholder for the case where calibration has never run, and
   // using it here would refuse nearly everything before a model was ever
-  // called — measuring gate 2's placeholder rather than the tool loop.
+  // called - measuring gate 2's placeholder rather than the tool loop.
   let cfg = { ...DEFAULT_CONFIG };
   try {
     const th = JSON.parse(readFileSync("public/thresholds.json", "utf8"));
@@ -169,7 +169,7 @@ async function main() {
   const sample = all.filter((q: { answerable: boolean }) => q.answerable).slice(0, LIMIT);
 
   console.log("=".repeat(72));
-  console.log("TOOL-CALL HARNESS — live");
+  console.log("TOOL-CALL HARNESS - live");
   console.log("=".repeat(72));
   console.log(`provider   : ${provider.label}`);
   console.log(`queries    : ${sample.length}\n`);
@@ -182,7 +182,7 @@ async function main() {
    * The same loop `ui/main.ts` runs, with the same tool executor.
    *
    * `generate` posts to a URL, so the fetch is redirected at the Worker's own
-   * stream function here — no Worker process, no dev server, and no second
+   * stream function here - no Worker process, no dev server, and no second
    * implementation of the protocol to keep in step.
    */
   const realFetch = globalThis.fetch;
@@ -256,8 +256,8 @@ async function main() {
   console.log("-".repeat(72));
   const ok = scriptedOk && answered > 0 && unavailable === 0;
   console.log(ok
-    ? "PASS — the loop runs end to end against the real provider"
-    : "FAIL — see reasons above");
+    ? "PASS - the loop runs end to end against the real provider"
+    : "FAIL - see reasons above");
   console.log("=".repeat(72));
   if (!ok) process.exit(1);
 }

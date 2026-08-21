@@ -27,7 +27,7 @@ const ISOLATION_HEADERS = {
  *
  * So the dev server mounts the same routes at the same paths: leave
  * `VITE_WORKER_BASE` empty, the client posts to a relative URL, and this answers
- * it. There is no second implementation to drift — the generator is imported
+ * it. There is no second implementation to drift - the generator is imported
  * from the Worker's own source, so the prompt and the event protocol are the
  * same code in both places.
  *
@@ -83,7 +83,7 @@ function generatorDevServer(env: Record<string, string>): Plugin {
 
     // The tool transcript is replayed the same way the Worker replays it, so
     // the loop behaves identically in development and in production. No
-    // validation here that the Worker does not also do — this server is bound
+    // validation here that the Worker does not also do - this server is bound
     // to localhost and its input comes from the page it is serving.
     for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v);
     await pipeToNode(

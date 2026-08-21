@@ -3,7 +3,7 @@
  *
  * A TypeScript port of `pipeline/src/chunking/strategies.py`, kept
  * strategy-for-strategy identical. User sources fuse with the shipped corpus in
- * the same RRF pass, and RRF compares ranks across strategies — so a user chunk
+ * the same RRF pass, and RRF compares ranks across strategies - so a user chunk
  * produced by a different rule than a corpus chunk with the same strategy label
  * would have the fusion weights applied to two different things.
  *
@@ -25,7 +25,7 @@ export type Strategy = "whole" | "sentence" | "sliding" | "contextual" | "semant
 
 export interface UserChunk {
   strategy: Strategy;
-  /** What the embedder sees — may carry a context header. */
+  /** What the embedder sees - may carry a context header. */
   embedText: string;
   /** Index of the parent passage within this source. */
   parent: number;
@@ -63,7 +63,7 @@ function headingOf(line: string): string | null {
 /**
  * Cut raw document text into passage-sized units.
  *
- * Paragraph boundaries come first — they are semantic joints the author put
+ * Paragraph boundaries come first - they are semantic joints the author put
  * there. Only paragraphs that overshoot are cut on sentence boundaries, and only
  * sentences that overshoot are cut on whitespace. The ladder keeps a well-formed
  * document from being cut mid-thought while still terminating on a pathological
@@ -152,18 +152,18 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
   passages.forEach((p, i) => {
     const text = p.text;
 
-    // 1. whole — the passage as-is. Strongest single index on this corpus shape.
+    // 1. whole - the passage as-is. Strongest single index on this corpus shape.
     push("whole", text, i);
 
     const sents = splitSentences(text);
 
-    // 2. sentence — precision. A one-sentence answer inside a long passage is
+    // 2. sentence - precision. A one-sentence answer inside a long passage is
     //    otherwise averaged away by the surrounding text.
     if (sents.length > 1) {
       for (const s of sents) if (s.length >= SENTENCE_MIN_CHARS) push("sentence", s, i);
     }
 
-    // 3. sliding — overlapping sentence windows. Catches answers that straddle a
+    // 3. sliding - overlapping sentence windows. Catches answers that straddle a
     //    boundary, and survives the bad punctuation that machine-translated and
     //    PDF-extracted text is full of.
     if (sents.length > SLIDING_WINDOW) {
@@ -172,10 +172,10 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
       }
     }
 
-    // 4. contextual — same span, richer embedding text. Numerics and Latin-script
+    // 4. contextual - same span, richer embedding text. Numerics and Latin-script
     //    tokens are restated in a header because dense vectors handle them worst.
     //    For a user document the section heading and title go in too, restoring
-    //    the anaphora a bare passage lost ("it doubled in Q3" — what did?).
+    //    the anaphora a bare passage lost ("it doubled in Q3" - what did?).
     const nums = uniq(text.match(NUMERIC) ?? []).slice(0, 8);
     const latin = uniq(text.match(LATIN_RUN) ?? []).slice(0, 8);
     const bits: string[] = [title];
@@ -184,7 +184,7 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
     if (nums.length) bits.push(nums.join(" "));
     push("contextual", `${bits.join(" | ")}\n${text}`, i);
 
-    // 5. semantic — group adjacent sentences that share vocabulary, so a complete
+    // 5. semantic - group adjacent sentences that share vocabulary, so a complete
     //    idea stays in one vector. Low yield on ~3-sentence passages; kept for
     //    parity and for the longer passages user documents contain.
     if (sents.length > 2) {
@@ -192,7 +192,7 @@ export function chunkPassages(passages: Passage[], title: string): UserChunk[] {
     }
   });
 
-  // 6. document — neighbouring passages merged. A recall instrument: dilute
+  // 6. document - neighbouring passages merged. A recall instrument: dilute
   //    vectors, but the only strategy that can find an answer spread across
   //    consecutive paragraphs.
   for (let i = 0; i < passages.length; i += 3) {

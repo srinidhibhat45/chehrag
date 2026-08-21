@@ -3,7 +3,7 @@
 # Interactive key setup.
 #
 # Prompts for each key one at a time and writes it to the file that needs it.
-# Input is read straight from your terminal into the file — it is not echoed,
+# Input is read straight from your terminal into the file - it is not echoed,
 # not logged, and never passes through a chat transcript or an agent's context.
 #
 #   ./scripts/setup-keys.sh          set up everything, skipping what you lack
@@ -56,7 +56,7 @@ ask() {
   val="$(printf '%s' "$val" | tr -d '[:space:]' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
 
   if [ -n "$prefix" ] && [[ "$val" != ${prefix}* ]]; then
-    echo "  ${red}that does not start with '${prefix}' — not saved.${off}"
+    echo "  ${red}that does not start with '${prefix}' - not saved.${off}"
     echo "  ${dim}re-run this script to try again${off}"
     return
   fi
@@ -69,13 +69,13 @@ want() { [ "$#" -eq 0 ] || [ "${TARGET:-all}" = "all" ] || [ "${TARGET}" = "$1" 
 
 TARGET="${1:-all}"
 
-echo "${bold}Chehrag — key setup${off}"
+echo "${bold}Chehrag - key setup${off}"
 echo "${dim}Nothing you type here is shown on screen or written anywhere except the"
 echo "file named under each prompt. Both files are gitignored.${off}"
 
 if [ "$TARGET" = all ] || [ "$TARGET" = groq ]; then
   ask "$WEB_ENV" GROQ_API_KEY \
-      "1. Groq  ${grn}[REQUIRED — free, no card]${off}" \
+      "1. Groq  ${grn}[REQUIRED - free, no card]${off}" \
       "https://console.groq.com/keys" \
       "written answers. Without this the app finds the right passage but can only quote it." \
       "gsk_"
@@ -83,7 +83,7 @@ fi
 
 if [ "$TARGET" = all ] || [ "$TARGET" = sarvam ]; then
   ask "$WORKER_ENV" SARVAM_API_KEY \
-      "2. Sarvam  ${ylw}[optional — voice in]${off}" \
+      "2. Sarvam  ${ylw}[optional - voice in]${off}" \
       "https://dashboard.sarvam.ai" \
       "real speech input, and spoken answers in the 8 Indic languages ElevenLabs lacks." \
       ""
@@ -91,7 +91,7 @@ fi
 
 if [ "$TARGET" = all ] || [ "$TARGET" = elevenlabs ]; then
   ask "$WORKER_ENV" ELEVENLABS_API_KEY \
-      "3. ElevenLabs  ${ylw}[optional — voice out]${off}" \
+      "3. ElevenLabs  ${ylw}[optional - voice out]${off}" \
       "https://elevenlabs.io/app/settings/api-keys" \
       "spoken answers in English, Hindi and Tamil." \
       ""
@@ -102,7 +102,7 @@ echo "${bold}what is configured now${off}"
 for f in "$WEB_ENV" "$WORKER_ENV"; do
   [ -f "$f" ] || continue
   echo "  ${dim}$f${off}"
-  # Names and lengths only — never the values.
+  # Names and lengths only - never the values.
   grep -E '^[A-Z_]+=' "$f" 2>/dev/null | while IFS='=' read -r k v; do
     printf '    %-22s %s\n' "$k" "${grn}set${off} ${dim}(${#v} chars)${off}"
   done

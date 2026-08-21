@@ -27,7 +27,7 @@ export type Refusal =
    *
    * Distinct from UNGROUNDED, and worth distinguishing: an ungrounded answer
    * asserts something the sources do not support, while this one asserts
-   * *where* it came from and is wrong about that. A model that invents excerpt
+   * where it came from and is wrong about that. A model that invents excerpt
    * 7 out of five has stopped reading and started composing, and its prose can
    * still overlap the real passages well enough to pass a coverage test.
    */
@@ -47,7 +47,7 @@ export interface GateResult {
 
 const PASS: GateResult = { pass: true };
 
-// -- Gate 1 — input validation ----------------------------------------------
+// -- Gate 1 - input validation ----------------------------------------------
 
 /**
  * Instruction-override attempts, EN + HI.
@@ -97,16 +97,16 @@ const QUESTION_HINTS =
  * Sanskrit at once and carries all four sets of question words (काय and कुठे
  * are Marathi, not Hindi).
  *
- * A script with no entry here is not judged — see `gateInput`.
+ * A script with no entry here is not judged - see `gateInput`.
  */
 const SCRIPT_QUESTION_HINTS: Array<{ script: RegExp; hints: RegExp }> = [
-  // Devanagari — Hindi, Marathi, Nepali, Sanskrit
+  // Devanagari - Hindi, Marathi, Nepali, Sanskrit
   { script: /[ऀ-ॿ]/,
     hints: /क्या|काय|कौन|कोण|कब|कधी|केव्हा|कहाँ|कहां|कुठे|क्यों|का\b|कैसे|कसे|कितन|किती|किस|कोणत|बताओ|बताएं|सांगा|नाम|कस्तो|कहिले|कहाँबाट/ },
   // Bengali / Assamese
   { script: /[ঀ-৿]/,
     hints: /কি|কী|কে|কোন|কখন|কেতিয়া|কোথায়|ক'ত|কেন|কিয়|কীভাবে|কিভাবে|কেনেকৈ|কত|কার/ },
-  // Gurmukhi — Punjabi
+  // Gurmukhi - Punjabi
   { script: /[਀-੿]/,
     hints: /ਕੀ|ਕੌਣ|ਕਦੋਂ|ਕਿੱਥੇ|ਕਿਥੇ|ਕਿਉਂ|ਕਿਵੇਂ|ਕਿਹੜ|ਕਿੰਨ|ਦੱਸੋ/ },
   // Gujarati
@@ -127,12 +127,12 @@ const SCRIPT_QUESTION_HINTS: Array<{ script: RegExp; hints: RegExp }> = [
   // Malayalam
   { script: /[ഀ-ൿ]/,
     hints: /എന്ത|ആര|എപ്പോൾ|എവിടെ|എന്തുകൊണ്ട|എങ്ങനെ|ഏത|എത്ര|പറയ/ },
-  // Arabic script — Urdu
+  // Arabic script - Urdu
   { script: /[؀-ۿ]/,
     hints: /کیا|کون|کب|کہاں|کیوں|کیسے|کونسا|کتنا|بتائیں|بتاؤ/ },
 ];
 
-/** Shannon entropy over characters — catches mashed keys and STT noise. */
+/** Shannon entropy over characters - catches mashed keys and STT noise. */
 function charEntropy(s: string): number {
   const f = new Map<string, number>();
   for (const c of s) f.set(c, (f.get(c) ?? 0) + 1);
@@ -148,7 +148,7 @@ export function gateInput(raw: string): GateResult {
   const q = raw.trim();
 
   if (!q) {
-    return { pass: false, reason: "EMPTY", message: "I didn't catch anything — could you say that again?" };
+    return { pass: false, reason: "EMPTY", message: "I didn't catch anything - could you say that again?" };
   }
   if (q.length < 3) {
     return { pass: false, reason: "TOO_SHORT", message: "That was too short for me to work with. Could you ask the full question?" };
@@ -192,7 +192,7 @@ export function gateInput(raw: string): GateResult {
 
   // Commands aimed at the system, as opposed to requests for information.
   //
-  // Tested positively — an imperative verb must be present — rather than by the
+  // Tested positively - an imperative verb must be present - rather than by the
   // absence of a question word. Information-seeking imperatives ("explain what a
   // bone scan is") carry no interrogative but are ordinary questions. The
   // interrogative sets above keep "how do I delete a file" out: a directive that
@@ -213,7 +213,7 @@ export function gateInput(raw: string): GateResult {
  *
  * Anchored to the start of the query (after an optional politeness or
  * "go ahead and" preamble) because that is where an imperative's verb goes.
- * Mid-sentence occurrences are usually the subject matter — "what happens when
+ * Mid-sentence occurrences are usually the subject matter - "what happens when
  * you delete a partition" is a question about deleting, not a deletion.
  */
 const ACTION_IMPERATIVE =
@@ -225,7 +225,7 @@ function hasInterrogative(q: string): boolean {
   return !!script && script.hints.test(q);
 }
 
-// -- Gate 2 — retrieval confidence ------------------------------------------
+// -- Gate 2 - retrieval confidence ------------------------------------------
 
 export interface RetrievalSignals {
   /** Best fused score. */
@@ -243,20 +243,19 @@ export interface ConfidenceThresholds {
   minAgreement: number;
   minLexicalOverlap: number;
   /**
-   * Mid-band rescue. A hit scoring below `minTopScore` but at or above
-   * `rescueMinScore`, whose winning passage shares at least `rescueMinOverlap`
-   * of the query's content words, is answered rather than refused.
+   * Mid-band rescue: a hit below `minTopScore` but at or above
+   * `rescueMinScore`, sharing at least `rescueMinOverlap` of the query's
+   * content words, is answered rather than refused.
    *
    * `minTopScore` is an absolute cosine fitted on MS MARCO, whose passages are
-   * dense on-topic search results. A user's prose document scores systematically
-   * lower, so its genuinely correct passages land in the mid-band. Score does
-   * not separate that band but overlap does: false positives there match the
-   * subject and not the question ("how much does a kettle cost" against a
-   * history of kettles) and score 0.0–0.4, while true positives score 0.5–1.0.
+   * dense on-topic search results. A user's prose scores lower, so its correct
+   * passages land in the mid-band. Score does not separate that band; overlap
+   * does. False positives there match the subject and not the question ("how
+   * much does a kettle cost" against a history of kettles) at 0.0-0.4, true
+   * positives at 0.5-1.0.
    *
-   * Applied to user-added sources only. `rag.ts` switches it off for corpus
-   * hits, which is the split `minTopScore` was fitted on. Set `rescueMinScore`
-   * to `Infinity` to disable it entirely.
+   * User sources only. `rag.ts` switches it off for corpus hits, which is the
+   * split `minTopScore` was fitted on. Infinity disables it.
    */
   rescueMinScore: number;
   rescueMinOverlap: number;
@@ -317,7 +316,7 @@ export function gateRetrieval(
   return PASS;
 }
 
-// -- Gate 3 — grounding -----------------------------------------------------
+// -- Gate 3 - grounding -----------------------------------------------------
 
 /**
  * Fraction of the answer's content tokens that appear in the retrieved context.
@@ -342,18 +341,17 @@ export function groundingScore(answer: string, contexts: string[]): number {
 
 /**
  * The specifics in a piece of text: tokens a model would have to invent rather
- * than merely phrase.
+ * than merely rephrase.
  *
- * A bag-of-words score cannot separate "You are 45" from "You are 46" — one
- * token in three, indistinguishable from ordinary phrasing variation — but that
- * token is the whole difference between a correct answer and a fabricated one.
- * Numbers and names identify it without a threshold:
+ * A bag-of-words score cannot separate "You are 45" from "You are 46", one
+ * token in three, yet that token is the whole difference between correct and
+ * fabricated. Numbers and names find it without a threshold:
  *
  *   digits    an age, a date, an amount, a duration, a version
  *   capitals  a person, a company, a place, a product
  *
- * Sentence-initial capitals are excluded — "Your" in "Your name is…" is
- * capitalised by grammar. Scripts without letter case contribute numbers only.
+ * Sentence-initial capitals are excluded, since "Your" in "Your name is..." is
+ * capitalised by grammar. Scripts without case contribute numbers only.
  */
 function specifics(text: string): Set<string> {
   const out = new Set<string>();
@@ -372,7 +370,7 @@ function specifics(text: string): Set<string> {
 }
 
 /**
- * Gate 3 — is the answer traceable to the passages it was written from?
+ * Gate 3 - is the answer traceable to the passages it was written from?
  *
  * Two tests doing two different jobs. The hard test is on specifics: every
  * number and every name in the answer must appear in the retrieved text, with
@@ -380,7 +378,7 @@ function specifics(text: string): Set<string> {
  * grounded. That is the test that catches hallucination.
  *
  * The soft test is a coverage floor on content words, a backstop against
- * wholesale topic drift — an answer written from the model's own knowledge in
+ * wholesale topic drift - an answer written from the model's own knowledge in
  * generic vocabulary. It is set low deliberately: a generated sentence
  * legitimately adds grammar that no source passage contains.
  */
@@ -396,7 +394,7 @@ export function gateGrounding(
    *
    * The corpus is Hindi and questions arrive in fourteen languages, so an
    * English answer written from a Hindi passage is the normal case, not an edge
-   * one — and it shares no tokens with its source at all. Word overlap between
+   * one - and it shares no tokens with its source at all. Word overlap between
    * two scripts measures translation rather than grounding.
    *
    * Numbers survive translation, so the digit half of the specifics check still
@@ -416,7 +414,7 @@ export function gateGrounding(
 
   const found = specifics(normaliseDigits(answer));
   const checked = crossScript
-    ? [...found].filter((w) => /\d/.test(w))     // numbers only — they translate
+    ? [...found].filter((w) => /\d/.test(w))     // numbers only - they translate
     : [...found];
   const invented = checked.filter((w) => !ctxRaw.has(w));
 
@@ -448,16 +446,16 @@ export function gateGrounding(
 }
 
 /**
- * Gate 3a — do the answer's citations refer to excerpts that exist?
+ * Gate 3a - do the answer's citations refer to excerpts that exist?
  *
  * The model answers by calling a tool and naming the excerpts it used, so this
  * is checkable rather than inferred. It runs before the grounding check because
- * it decides *which* passages grounding is measured against: an answer that
+ * it decides which passages grounding is measured against: an answer that
  * cites excerpt 7 of 5 cannot be checked at all, and passing it on the strength
  * of the excerpts it did not claim to use would be checking the wrong thing.
  *
  * An empty citation list is not a failure. Some providers ignore the field, and
- * the caller then falls back to checking against every excerpt supplied — a
+ * the caller then falls back to checking against every excerpt supplied - a
  * weaker test, but the honest one when the model has not said.
  */
 export function gateCitations(cited: number[], available: number): GateResult {

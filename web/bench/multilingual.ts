@@ -1,14 +1,14 @@
 /**
- * Multilingual stress test — the offline half.
+ * Multilingual stress test - the offline half.
  *
  * The corpus is Hindi and the embedder is multilingual, which is a claim about
  * cross-lingual retrieval. This measures it: the same 500 MS MARCO queries in
  * fourteen Indian languages plus English, joined on `query_id`, asked against a
  * Hindi index.
  *
- * Runs the SAME modules the browser runs, so the numbers describe shipped code.
+ * Runs the same modules the browser runs, so the numbers describe shipped code.
  * The scoring logic itself lives in `src/eval/multilingual.ts` and is shared
- * with the in-app runner — a second implementation here would be a second thing
+ * with the in-app runner - a second implementation here would be a second thing
  * to keep correct, and the two would drift.
  *
  * The refusal histogram is the part worth reading. Latency barely moves across
@@ -49,11 +49,11 @@ function loadFromDisk() {
 
 async function main() {
   if (!existsSync(join(INDEX_DIR, "manifest.json"))) {
-    console.error(`no index at ${INDEX_DIR} — run pipeline/src/build_index.py first`);
+    console.error(`no index at ${INDEX_DIR} - run pipeline/src/build_index.py first`);
     process.exit(1);
   }
   if (!existsSync(DATA)) {
-    console.error(`no parallel queries at ${DATA} — run pipeline/src/parallel_queries.py first`);
+    console.error(`no parallel queries at ${DATA} - run pipeline/src/parallel_queries.py first`);
     process.exit(1);
   }
 
@@ -73,12 +73,12 @@ async function main() {
       minLexicalOverlap: t.minLexicalOverlap ?? 0,
     } };
   } else {
-    console.warn("WARNING no thresholds.json — using conservative defaults, " +
+    console.warn("WARNING no thresholds.json - using conservative defaults, " +
                  "which refuse far more than the calibrated values");
   }
 
   const engine = new RagEngine(index, encoder, cfg);
-  // The engine ships with the corpus off — the app starts empty so that an
+  // The engine ships with the corpus off - the app starts empty so that an
   // answer can only have come from what the user added. Every benchmark here
   // exists to measure that corpus, so it opts in explicitly.
   engine.setCorpusEnabled(true);
@@ -108,7 +108,7 @@ async function main() {
     perLang: PER_LANG,
     onProgress: (done, _total, label) => {
       currentLang = langs[done]?.code ?? label;
-      process.stderr.write(`  ${label}…\r`);
+      process.stderr.write(`  ${label}...\r`);
     },
   });
   process.stderr.write(" ".repeat(40) + "\r");

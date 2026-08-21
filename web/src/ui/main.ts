@@ -1,25 +1,19 @@
 /**
- * App wiring.
+ * App wiring. Two timing paths, kept apart.
  *
- * Two timing paths, kept strictly separate:
+ *   fast (measured, 200 ms)   embed, retrieve, fuse, rescore, guard, extract.
+ *                             All in the browser, corpus and user sources
+ *                             alike. This is what the chip under an answer
+ *                             reports, and all it reports.
+ *   slow (best effort)        Sarvam STT before the question exists, the model
+ *                             that writes the answer, TTS afterwards. None of
+ *                             it may touch the measured span.
  *
- *   Fast path (measured, 200 ms budget) — embed, retrieve, fuse, rescore, guard,
- *   extract. Entirely in the browser, across both the shipped corpus and the
- *   user's sources. This is what the chip under each answer reports, and the
- *   only thing it reports.
+ * With no generator configured the app still answers, showing the matching
+ * passage labelled as a quotation. That is a degraded mode and it says so.
  *
- *   Slow path (unmeasured, best effort) — Sarvam speech-to-text before the
- *   question exists, the model that writes the answer from the retrieved
- *   passages, and ElevenLabs or Sarvam speech afterwards. None of it may touch
- *   the measured span.
- *
- * Writing the answer is on the slow path but is not optional to the product.
- * With no generator configured the app still works, showing the passage that
- * matched, labelled as a quotation; that is a degraded mode and the interface
- * says so.
- *
- * Service availability comes from the Worker's `/health`, so the interface never
- * claims a Sarvam or ElevenLabs integration it has not confirmed.
+ * Service availability comes from the Worker's /health, so the UI never claims
+ * an integration it has not confirmed.
  */
 
 import { loadIndex } from "../retrieval/loader";
@@ -131,16 +125,16 @@ function syncSources(): void {
  */
 const LANGS: Array<{ tag: string; label: string }> = [
   { tag: "auto",  label: "Detect automatically" },
-  { tag: "hi-IN", label: "हिन्दी — Hindi" },
-  { tag: "bn-IN", label: "বাংলা — Bengali" },
-  { tag: "ta-IN", label: "தமிழ் — Tamil" },
-  { tag: "te-IN", label: "తెలుగు — Telugu" },
-  { tag: "mr-IN", label: "मराठी — Marathi" },
-  { tag: "gu-IN", label: "ગુજરાતી — Gujarati" },
-  { tag: "kn-IN", label: "ಕನ್ನಡ — Kannada" },
-  { tag: "ml-IN", label: "മലയാളം — Malayalam" },
-  { tag: "pa-IN", label: "ਪੰਜਾਬੀ — Punjabi" },
-  { tag: "od-IN", label: "ଓଡ଼ିଆ — Odia" },
+  { tag: "hi-IN", label: "हिन्दी - Hindi" },
+  { tag: "bn-IN", label: "বাংলা - Bengali" },
+  { tag: "ta-IN", label: "தமிழ் - Tamil" },
+  { tag: "te-IN", label: "తెలుగు - Telugu" },
+  { tag: "mr-IN", label: "मराठी - Marathi" },
+  { tag: "gu-IN", label: "ગુજરાતી - Gujarati" },
+  { tag: "kn-IN", label: "ಕನ್ನಡ - Kannada" },
+  { tag: "ml-IN", label: "മലയാളം - Malayalam" },
+  { tag: "pa-IN", label: "ਪੰਜਾਬੀ - Punjabi" },
+  { tag: "od-IN", label: "ଓଡ଼ିଆ - Odia" },
   { tag: "en-IN", label: "English" },
 ];
 
@@ -226,7 +220,7 @@ async function probeWiring(): Promise<void> {
 
   // Probed unconditionally rather than only when `VITE_WORKER_BASE` is set.
   // With no Worker configured this is a same-origin request, which the dev
-  // server answers — that is what lets `npm run dev` produce real answers from a
+  // server answers - that is what lets `npm run dev` produce real answers from a
   // key in `web/.env.local`. In production without a Worker the SPA fallback
   // returns HTML, `json()` throws, and everything stays off.
   try {
@@ -240,7 +234,7 @@ async function probeWiring(): Promise<void> {
     wiring.ttsEleven = !!h.tts?.elevenlabs;
     wiring.ttsSarvam = !!h.tts?.sarvam;
     wiring.llm = !!h.llm;
-  } catch { /* no generator reachable — everything stays off */ }
+  } catch { /* no generator reachable - everything stays off */ }
   await speaker.probe();
   renderWiring();
 }
@@ -248,8 +242,8 @@ async function probeWiring(): Promise<void> {
 /**
  * Reflect what the Worker confirmed.
  *
- * Stated in words under the voice pickers — which voice will speak, and whether
- * speech input is the real path or the browser's fallback — rather than as a row
+ * Stated in words under the voice pickers - which voice will speak, and whether
+ * speech input is the real path or the browser's fallback - rather than as a row
  * of per-provider status dots, which asks the reader to care about the vendor.
  */
 function renderWiring(): void {
@@ -274,7 +268,7 @@ function updateVoiceNote(): void {
       elevenlabs: "ElevenLabs",
       sarvam: "Sarvam",
       browser: "your browser's built-in voice",
-      none: "nothing — no voice is available here",
+      none: "nothing - no voice is available here",
     };
     parts.push(`Answers are read aloud by ${NAME[route]}.`);
   }
@@ -282,7 +276,7 @@ function updateVoiceNote(): void {
     parts.push("Questions are heard by your browser's own recogniser.");
   }
   if (!wiring.sttSarvam && askLang() === "auto") {
-    parts.push("It can't detect the language on its own, so it will assume Hindi — pick one above to be sure.");
+    parts.push("It can't detect the language on its own, so it will assume Hindi - pick one above to be sure.");
   }
   $("voice-note").textContent = parts.join(" ");
 }
@@ -312,16 +306,16 @@ async function boot(): Promise<void> {
 
   // Ticked off individually rather than after the `Promise.all` below: they
   // finish at different times, and the step list exists to show which one is
-  // outstanding. Rejections are swallowed here only — `Promise.all` still sees
+  // outstanding. Rejections are swallowed here only - `Promise.all` still sees
   // them, and `boot()`'s caller reports them.
   void indexPromise.then(() => curtain.stepDone("index"), () => { /* reported by boot() */ });
   void encoderPromise.then(() => curtain.stepDone("model"), () => { /* reported by boot() */ });
 
-  orb.set("dormant", "Lighting the lamp…");
+  orb.set("dormant", "Lighting the lamp...");
   const [index, enc] = await Promise.all([indexPromise, encoderPromise]);
   encoder = enc;
   orb.setCharge(0.95);
-  $("orb-sub").textContent = "warming up…";
+  $("orb-sub").textContent = "warming up...";
   curtain.stepRun("warm", "running");
 
   // Fitted offline by `bench/calibrate.ts`. If that has never run, fall back to
@@ -399,7 +393,7 @@ async function boot(): Promise<void> {
 
   orb.set("idle", "Ready", micReady()
     ? "tap the lamp, or press space, and speak"
-    : "no microphone here — the keyboard is open below");
+    : "no microphone here - the keyboard is open below");
   // Not the text field, which is hidden. Focusing the lamp means the first
   // Enter or Space starts listening.
   if (micReady()) $<HTMLButtonElement>("orb").focus();
@@ -426,7 +420,7 @@ function checkIsolation(): void {
     "to be. Serve it with:\n" +
     "  Cross-Origin-Opener-Policy: same-origin\n" +
     "  Cross-Origin-Embedder-Policy: credentialless\n" +
-    "(see web/public/_headers — Cloudflare Pages reads it automatically).",
+    "(see web/public/_headers - Cloudflare Pages reads it automatically).",
   );
 }
 
@@ -443,7 +437,7 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
 
   chat.addUser(q, opts.voice);
   const handle = chat.addPending();
-  orb.set("thinking", "Looking…", "");
+  orb.set("thinking", "Looking...", "");
 
   try {
     // Bulk embedding is paused for the duration. Ingestion already yields
@@ -461,7 +455,7 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
     // Looked up here rather than inside `writeAnswer`, for two reasons.
     //
     // `engine.lastQueryVector` is overwritten by the next question, and
-    // `writeAnswer` is deliberately not awaited — so a speculative retrieval
+    // `writeAnswer` is deliberately not awaited - so a speculative retrieval
     // fired by a voice partial could replace the vector before an async lookup
     // read it, and the answer would be matched against the wrong question.
     //
@@ -519,7 +513,7 @@ async function ask(text: string, opts: { voice?: boolean } = {}): Promise<void> 
       // is a passage, and is labelled as one rather than presented as something
       // the system wrote.
       handle.fallBackToExtract(
-        "No answer writer is configured, so this is the passage that matched — quoted, not answered.",
+        "No answer writer is configured, so this is the passage that matched - quoted, not answered.",
       );
       if (speakWhenReady) void speakAnswer(res.answer, null, handle);
     }
@@ -543,20 +537,16 @@ function renderSessionStats(): void {
 }
 
 /**
- * Write the answer.
+ * Write the answer. Off the measured path: this is a round trip to a model.
  *
- * Off the measured path by construction: this is a network round trip to a
- * model. It is not optional to the product, though — retrieval finds the passage
- * that contains the answer, and this turns it into one.
- *
- * Three ways it can end, each leaving something usable on screen:
+ * Three endings, each leaving something usable on screen:
  *
  *   answer         streamed into the bubble, then checked against the passages
- *                  it came from (gate 3) before it is allowed to stand
- *   insufficient   the model read the passages and reports that they do not
- *                  answer the question — a refusal the retrieval gate missed
- *   unavailable    no key, worker down, timeout — the retrieved passage is
- *                  shown instead, labelled as a quotation
+ *                  it came from (gate 3) before it stands
+ *   insufficient   the model read the passages and says they do not answer the
+ *                  question, a refusal the retrieval gate missed
+ *   unavailable    no key, worker down, timeout. The retrieved passage is shown
+ *                  instead, labelled as a quotation
  */
 async function writeAnswer(
   query: string,
@@ -613,7 +603,7 @@ async function writeAnswer(
     // is cheaper than a universal delay.
     //
     // Checked against what the model says it used, not against everything
-    // retrieved — and `verifyGenerated` fails an answer citing an excerpt that
+    // retrieved - and `verifyGenerated` fails an answer citing an excerpt that
     // was never supplied, which is a fabricated citation however well the prose
     // happens to match.
     if (engine.verifyGenerated(outcome.text, outcome.sources, outcome.cited).pass) {
@@ -634,8 +624,8 @@ async function writeAnswer(
     // that is fine.
     handle.fallBackToExtract(
       outcome.reason === "no generator configured"
-        ? "No answer writer is set up, so this is the passage that matched — quoted, not answered."
-        : `I couldn't reach the answer writer (${outcome.reason}), so this is the passage that matched — quoted, not answered.`,
+        ? "No answer writer is set up, so this is the passage that matched - quoted, not answered."
+        : `I couldn't reach the answer writer (${outcome.reason}), so this is the passage that matched - quoted, not answered.`,
     );
   }
 
@@ -659,7 +649,7 @@ async function speakAnswer(
   handle?: BotHandle,
 ): Promise<void> {
   const lang = lastHeardLanguage ?? scriptLanguage(text);
-  if (btn) btn.textContent = "Speaking…";
+  if (btn) btn.textContent = "Speaking...";
   try {
     const r = await speaker.speak(text, lang);
     const NAME: Record<TtsProvider, string> = {
@@ -704,7 +694,7 @@ async function toggleMic(): Promise<void> {
   live.hidden = false;
   delete live.dataset.error;
   live.dataset.partial = "1";
-  live.textContent = "Listening…";
+  live.textContent = "Listening...";
   lastPartial = "";
   lastHeardLanguage = null;
   orb.set("listening", "Listening", "tap the lamp again when you're done");
@@ -723,7 +713,7 @@ async function toggleMic(): Promise<void> {
         // unmeasured, so it never appears in the reported numbers.
         if (e.text.length > 12 && e.text !== lastPartial && !asking) {
           lastPartial = e.text;
-          void engine.ask(e.text).catch(() => { /* speculative — failure is free */ });
+          void engine.ask(e.text).catch(() => { /* speculative - failure is free */ });
         }
       } else if (e.type === "final") {
         live.dataset.partial = "0";
@@ -740,7 +730,7 @@ async function toggleMic(): Promise<void> {
       } else if (e.type === "error") {
         live.dataset.error = "1";
         live.textContent = e.message;
-        // Back to Ready rather than "Looking…": nothing was heard, so nothing
+        // Back to Ready rather than "Looking...": nothing was heard, so nothing
         // is being looked up, and the caption is the app's status line.
         void stopMic("idle");
         // Speech has visibly failed, so open the keyboard rather than leaving
@@ -768,16 +758,16 @@ async function toggleMic(): Promise<void> {
     await sttEngine.start();
     if (stt !== sttEngine) return;   // superseded or stopped while starting
     recording = true;
-    // The fire pulses with the voice. Without a stream — permission granted but
-    // Web Audio unavailable — it stays lit without the pulse.
+    // The fire pulses with the voice. Without a stream - permission granted but
+    // Web Audio unavailable - it stays lit without the pulse.
     const stream = sttEngine.micStream;
     if (stream) orb.listenTo(stream);
     if (sttKind === "browser") {
-      live.textContent = "Listening… (browser recogniser — Sarvam key not configured)";
+      live.textContent = "Listening... (browser recogniser - Sarvam key not configured)";
     }
   } catch (err) {
     live.dataset.error = "1";
-    live.textContent = `Microphone unavailable — ${err instanceof Error ? err.message : String(err)}`;
+    live.textContent = `Microphone unavailable - ${err instanceof Error ? err.message : String(err)}`;
     $("stage").dataset.listening = "0";
     orb.set("idle", "Ready", "");
     // A refused microphone is the one case where the keyboard has to appear
@@ -792,7 +782,7 @@ async function stopMic(next: "thinking" | "idle" = "thinking"): Promise<void> {
   $("stage").dataset.listening = "0";
   orb.stopListening();
   if (orb.current === "listening") {
-    if (next === "thinking") orb.set("thinking", "Looking…", "");
+    if (next === "thinking") orb.set("thinking", "Looking...", "");
     else orb.set("idle", "Ready", "tap the lamp, or press space, and speak");
   }
   const s = stt;
@@ -800,7 +790,7 @@ async function stopMic(next: "thinking" | "idle" = "thinking"): Promise<void> {
   await s?.stop().catch(() => { /* already closed */ });
 
   // A recogniser asked to stop is not obliged to emit a final, and the browser
-  // one sometimes does not. Without this the caption sits on "Looking…" for a
+  // one sometimes does not. Without this the caption sits on "Looking..." for a
   // search that never started.
   if (next === "thinking") {
     setTimeout(() => {

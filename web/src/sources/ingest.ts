@@ -75,7 +75,7 @@ export function ingestPaste(raw: string, title?: string): Extracted {
 function firstLineTitle(text: string): string {
   const line = text.split("\n").find((l) => l.trim().length > 0) ?? "Pasted text";
   const t = line.trim().replace(/^#+\s*/, "");
-  return t.length > 64 ? `${t.slice(0, 61)}…` : t;
+  return t.length > 64 ? `${t.slice(0, 61)}...` : t;
 }
 
 // -- files ------------------------------------------------------------------
@@ -109,7 +109,7 @@ export async function ingestFile(file: File): Promise<Extracted> {
     text = await file.text();
   } else {
     // Unknown extension: try it as text rather than refusing outright, but
-    // reject binary — decoded binary is noise that would poison retrieval.
+    // reject binary - decoded binary is noise that would poison retrieval.
     const guess = await file.text();
     if (looksBinary(guess)) {
       throw new IngestError(`Can't read ${name}.`,
@@ -121,7 +121,7 @@ export async function ingestFile(file: File): Promise<Extracted> {
   const norm = normalise(text);
   if (norm.length < 20) {
     throw new IngestError(`${name} had no readable text.`,
-      "If it's a scanned PDF, the pages are images — run OCR first.");
+      "If it's a scanned PDF, the pages are images - run OCR first.");
   }
   const clamped = clamp(norm);
   return {
@@ -186,7 +186,7 @@ async function extractPdf(file: File): Promise<{ text: string; note?: string }> 
     : undefined;
   if (text.replace(/\s/g, "").length < 40) {
     throw new IngestError(`${file.name} has no text layer.`,
-      "It's probably a scan — run OCR on it first, then add the result.");
+      "It's probably a scan - run OCR on it first, then add the result.");
   }
   return { text, note };
 }
@@ -335,7 +335,7 @@ export async function ingestUrl(url: string, workerBase: string): Promise<Extrac
 
 function urlErrorMessage(code: string | undefined, status: number): string {
   switch (code) {
-    case "blocked_host":    return "That address points at a private network — refused.";
+    case "blocked_host":    return "That address points at a private network - refused.";
     case "too_large":       return "That page is too large to add.";
     case "unsupported_type":return "That link isn't a web page or text file.";
     case "upstream_status": return "The site refused the request.";

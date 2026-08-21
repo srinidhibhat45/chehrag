@@ -7,8 +7,8 @@
  * difference here would leave the guardrail reading two incompatible score
  * scales.
  *
- * Its own module because the store needs the exact bytes twice — once to search
- * and once to persist — and doing this inside the index would quantise twice.
+ * Its own module because the store needs the exact bytes twice - once to search
+ * and once to persist - and doing this inside the index would quantise twice.
  */
 
 import type { Strategy } from "./chunk";
@@ -22,22 +22,42 @@ export const STRATEGY_NAMES = [
 export const STRATEGY_IDS: Record<Strategy, number> =
   Object.fromEntries(STRATEGY_NAMES.map((s, i) => [s, i])) as Record<Strategy, number>;
 
+/** Scratch for the centred input. Ingestion is single-threaded per worker. */
+let centred = new Float32Array(0);
+
 /**
  * Centre, project onto the PCA basis, re-L2-normalise.
  *
  * Mirrors `build_index.py::project`. The re-normalisation is not optional: PCA
- * does not preserve unit norm, and every downstream comparison assumes it.
+ * does not preserve unit norm and everything downstream assumes it.
  */
 export function project(
   raw: Float32Array, pcaMean: Float32Array, pcaComp: Float32Array,
   dim: number, out: Float32Array,
 ): Float32Array {
   const rawDim = pcaMean.length;
+  if (centred.length !== rawDim) centred = new Float32Array(rawDim);
+  // Centring hoisted out of the inner loop: inline it and the same 384
+  // subtractions run once per output component instead of once per vector.
+  for (let j = 0; j < rawDim; j++) centred[j] = raw[j] - pcaMean[j];
+
   let norm = 0;
+  const quad = rawDim % 4 === 0;
   for (let i = 0; i < dim; i++) {
-    let s = 0;
     const off = i * rawDim;
-    for (let j = 0; j < rawDim; j++) s += pcaComp[off + j] * (raw[j] - pcaMean[j]);
+    let s = 0;
+    if (quad) {
+      let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+      for (let j = 0; j < rawDim; j += 4) {
+        s0 += pcaComp[off + j] * centred[j];
+        s1 += pcaComp[off + j + 1] * centred[j + 1];
+        s2 += pcaComp[off + j + 2] * centred[j + 2];
+        s3 += pcaComp[off + j + 3] * centred[j + 3];
+      }
+      s = s0 + s1 + s2 + s3;
+    } else {
+      for (let j = 0; j < rawDim; j++) s += pcaComp[off + j] * centred[j];
+    }
     out[i] = s;
     norm += s * s;
   }

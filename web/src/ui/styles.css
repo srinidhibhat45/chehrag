@@ -1,5 +1,5 @@
 /**
- * Chehrag — design rules.
+ * Chehrag - design rules.
  *
  * The name is चिराग़, a small oil lamp, crossed with RAG. The interface is that
  * lamp in a cold, unlit room: graphite everywhere, and one warm light at the
@@ -10,15 +10,15 @@
  * Four rules the rest of this file obeys.
  *
  * 1. Colour is light. If a thing is not a light source it has no hue. The flame
- *    appears in three places — the lamp, the mark beside the wordmark, and the
+ *    appears in three places - the lamp, the mark beside the wordmark, and the
  *    dot that signs an answer. Buttons, borders, focus rings, toggles and states
  *    are drawn in ink and paper. One warning tone exists for a refusal or a
  *    blown budget, used as text and never as a fill.
  *
  * 2. Two sans faces, for different jobs. Outfit is geometric and architectural;
  *    it sets the wordmark and the display line and nothing else, so those read
- *    as built rather than typed. Inter does every word a person actually reads —
- *    answers, passages, labels, controls — having been drawn for that at these
+ *    as built rather than typed. Inter does every word a person actually reads -
+ *    answers, passages, labels, controls - having been drawn for that at these
  *    sizes. Noto Sans Devanagari carries the Indic text at matching weights.
  *    The display face takes negative tracking, which geometric sans needs at
  *    large sizes and text sans never does. The monospace is reserved for figures
@@ -36,7 +36,7 @@
  */
 
 :root {
-  /* the room — cool graphite, deliberately not warm. The one warm thing on
+  /* the room - cool graphite, deliberately not warm. The one warm thing on
      the page is the lamp, and warmth reads as light only against cold. */
   --ground:    #101113;
   --ground-2:  #16181b;
@@ -50,7 +50,7 @@
   --ink-2:     #9ba1a9;
   --ink-3:     #6a7078;
 
-  /* the flame — the only chroma on the page */
+  /* the flame - the only chroma on the page */
   --flame:      #ffa33d;
   --flame-rgb:  255 163 61;
   --flame-hot:  #ffe2b0;
@@ -231,7 +231,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   min-height: 0;
   min-width: 0;
   /* The lamp spills a little into the room it lights. This is the only
-     gradient in the file and it is doing a literal job — which is why it
+     gradient in the file and it is doing a literal job - which is why it
      moved when the lamp did, from the top right to the foot of the column. */
   background:
     radial-gradient(62% 38% at 50% 100%, rgb(var(--flame-rgb) / .055), transparent 72%),
@@ -304,7 +304,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .add-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .add-row input { flex: 1; min-width: 0; }
 
-/* The primary button is ink on paper — the flame is a light, not a brand
+/* The primary button is ink on paper - the flame is a light, not a brand
    colour, and putting it on a button would make it decoration (rule 1). */
 .btn {
   padding: 8px 15px;
@@ -355,7 +355,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 12px; }
 
 /* A question asked with nothing loaded opens the add panel; this says where to
-   look. Two seconds, then it is gone — a permanent highlight is just a colour. */
+   look. Two seconds, then it is gone - a permanent highlight is just a colour. */
 .rail[data-hilite="1"] .add-panel {
   border-color: var(--ink-3);
   transition: border-color .2s;
@@ -468,8 +468,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .thread > * { max-width: 700px; margin-inline: auto; padding-inline: 28px; }
 
 /* An empty room with a lamp in it. What the system is made of is stated where
-   each part is checkable — the rail names the corpus and counts its chunks, and
-   every answer carries its own stopwatch and source — so none of it is
+   each part is checkable - the rail names the corpus and counts its chunks, and
+   every answer carries its own stopwatch and source - so none of it is
    explained here on arrival. */
 .welcome { padding-top: 6vh; padding-bottom: 10px; }
 .welcome-h {
@@ -507,7 +507,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .msg-bot { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; }
 
-/* The lamp signs its own answers — one of the three places colour is allowed
+/* The lamp signs its own answers - one of the three places colour is allowed
    (rule 1), because this dot is the same light as the one in the wordmark. */
 .msg-dot {
   width: 8px; height: 8px;
@@ -544,7 +544,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* -- the speed reading ---------------------------------------------------- */
-/* Small, inline, one per answer — the reading belongs to the answer it
+/* Small, inline, one per answer - the reading belongs to the answer it
    describes, not to a separate screen you have to go and find. */
 
 .msg-meta {
@@ -720,7 +720,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /*
    Under every answer, always visible: which document said so is the second half
    of the answer, not a disclosure control that happens to name a file. It is
-   also the control that opens the passages, which is where that belongs — click
+   also the control that opens the passages, which is where that belongs - click
    the name of the document to see what the document said.
 
    Drawn as text with one underlined name rather than as a chip. A pill would
@@ -789,7 +789,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: var(--ink-3);
 }
 /* A stored answer has no duration to report, so it is named rather than timed.
-   Same weight as the figure it stands in for — it is a fact about the answer,
+   Same weight as the figure it stands in for - it is a fact about the answer,
    not a badge on it (rule 1: no fills, no colour). */
 .gen-ms[data-precomputed="1"] { font-family: var(--sans); font-size: 12px; }
 .speed-what { font: inherit; font-size: 11px; color: var(--ink-3); }
@@ -805,7 +805,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Rule 1, read from the other end: the one lit thing on the page is also the
    one you press. The lamp sits at the foot of the conversation and is the
    largest element in the column; the keyboard is a button until asked for.
-   Nothing here transitions size — the stage compacts on the first question,
+   Nothing here transitions size - the stage compacts on the first question,
    which is a moment that lands inside a measured query (rule 4). */
 
 .stage {
@@ -835,7 +835,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .orb:disabled { cursor: default; }
 .orb:focus-visible { outline: 2px solid var(--ink-3); outline-offset: 6px; border-radius: 50%; }
 
-/* The caption is the status line of the whole app — what the lamp is doing
+/* The caption is the status line of the whole app - what the lamp is doing
    right now, in one word. */
 .orb-caption {
   margin: 12px 0 0;
@@ -846,7 +846,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* What it heard, in the speaker's own words. In a voice-first app this is the
    most important text on screen while it is on screen, so it is set at
-   reading size rather than as a status crumb — italic while the transcript is
+   reading size rather than as a status crumb - italic while the transcript is
    still provisional, upright once the recogniser has committed to it. */
 .transcript {
   margin: 9px 0 0;
@@ -1028,7 +1028,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
    than a scrim on purpose: a half-visible disabled interface underneath
    invites the clicking that the block exists to prevent.
 
-   Obeys rule 1 — the only chroma here is the lamp and the bar it is filling,
+   Obeys rule 1 - the only chroma here is the lamp and the bar it is filling,
    which are the same object. The ticks, the rules and every word are ink. */
 .curtain {
   position: fixed; inset: 0;

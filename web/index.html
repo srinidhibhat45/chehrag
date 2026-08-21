@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Chehrag</title>
-  <meta name="description" content="Ask questions out loud in fourteen Indian languages and get an answer from your own documents in under 200 milliseconds, entirely in your browser." />
+  <meta name="description" content="Ask a question out loud in eleven languages and get an answer from your own documents in under 200 milliseconds, entirely in your browser." />
   <meta name="theme-color" content="#101113" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)" />
 
@@ -74,7 +74,7 @@
       </div>
 
       <div class="add-pane" id="pane-paste">
-        <textarea id="paste-text" rows="4" placeholder="Paste text, notes, an article — anything you want to ask about."></textarea>
+        <textarea id="paste-text" rows="4" placeholder="Paste text, notes, an article - anything you want to ask about."></textarea>
         <div class="add-row">
           <input id="paste-title" type="text" placeholder="Title (optional)" />
           <button class="btn" id="paste-add">Add</button>
@@ -102,7 +102,7 @@
           <button class="btn" id="url-add">Fetch</button>
         </div>
         <p class="add-note" id="url-note">
-          Fetched for you — a browser can't read another site directly.
+          Fetched for you - a browser can't read another site directly.
         </p>
       </div>
 
@@ -116,7 +116,7 @@
         <span class="src-kind">Set</span>
         <div class="src-body">
           <div class="src-title">MS MARCO-XI · Hindi</div>
-          <div class="src-meta" id="corpus-meta">loading…</div>
+          <div class="src-meta" id="corpus-meta">loading...</div>
         </div>
         <div class="src-actions">
           <button class="src-toggle" id="corpus-toggle" type="button"
@@ -141,7 +141,7 @@
            the rail, which names the corpus, and on each answer, which carries
            its own stopwatch and source. -->
       <div class="welcome" id="welcome">
-        <h1 class="welcome-h">Ask out loud,<br />in fourteen languages.</h1>
+        <h1 class="welcome-h">Ask out loud,<br />in eleven languages.</h1>
       </div>
     </div>
 
@@ -153,10 +153,10 @@
         <span class="orb-ember" aria-hidden="true"></span>
       </button>
 
-      <p class="orb-caption" id="orb-caption" role="status" aria-live="polite">Lighting the lamp…</p>
+      <p class="orb-caption" id="orb-caption" role="status" aria-live="polite">Lighting the lamp...</p>
       <!-- what it is hearing, in the visitor's own words, while they speak -->
       <p class="transcript" id="transcript" hidden></p>
-      <p class="orb-sub" id="orb-sub">the first visit downloads the index — after that it opens instantly</p>
+      <p class="orb-sub" id="orb-sub">the first visit downloads the index - after that it opens instantly</p>
 
       <div class="stage-controls">
         <label class="lang-pick">
@@ -190,7 +190,7 @@
       <!-- The keyboard path: present, complete, and second. -->
       <form class="composer" id="ask-form" autocomplete="off" hidden>
         <input class="composer-input" id="q" type="text" enterkeyhint="go"
-               placeholder="Type a question…" spellcheck="false"
+               placeholder="Type a question..." spellcheck="false"
                aria-label="Your question" disabled />
         <button class="send-btn" id="go" type="submit" aria-label="Ask" disabled>
           <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
@@ -216,10 +216,10 @@
       <section class="card">
         <h3 class="card-h">This session</h3>
         <div class="stat-row">
-          <div class="stat"><span class="stat-v" id="stat-p50">—</span><span class="stat-k">P50</span></div>
-          <div class="stat"><span class="stat-v" id="stat-p70">—</span><span class="stat-k">P70</span></div>
-          <div class="stat"><span class="stat-v" id="stat-p100">—</span><span class="stat-k">P100</span></div>
-          <div class="stat"><span class="stat-v" id="stat-n">—</span><span class="stat-k">asked</span></div>
+          <div class="stat"><span class="stat-v" id="stat-p50">-</span><span class="stat-k">P50</span></div>
+          <div class="stat"><span class="stat-v" id="stat-p70">-</span><span class="stat-k">P70</span></div>
+          <div class="stat"><span class="stat-v" id="stat-p100">-</span><span class="stat-k">P100</span></div>
+          <div class="stat"><span class="stat-v" id="stat-n">-</span><span class="stat-k">asked</span></div>
         </div>
         <p class="card-note">
           Milliseconds, measured in this browser, across every question you've
@@ -243,7 +243,7 @@
 
     <h2 class="curtain-h" id="curtain-h">Lighting the lamp</h2>
     <p class="curtain-why">
-      Chehrag searches an index that lives in this browser — nothing is
+      Chehrag searches an index that lives in this browser - nothing is
       uploaded, and no question waits on a network. It has to arrive first.
     </p>
 
@@ -272,7 +272,7 @@
       </li>
     </ol>
 
-    <p class="curtain-foot" id="curtain-foot">One time only — after this it opens from cache.</p>
+    <p class="curtain-foot" id="curtain-foot">One time only - after this it opens from cache.</p>
 
     <button class="btn curtain-retry" id="curtain-retry" type="button" hidden>Reload</button>
 
@@ -284,8 +284,8 @@
 </div>
 
 <!-- The curtain is up and `.app` is inert from the first frame, so a module
-     that never runs at all — a chunk 404 after a bad deploy, a blocking CSP, a
-     parse error — would leave a visitor at a bar that never moves with no way
+     that never runs at all - a chunk 404 after a bad deploy, a blocking CSP, a
+     parse error - would leave a visitor at a bar that never moves with no way
      past it. `curtain.ts` cannot report that, being the thing that did not
      load, so this net is inline, classic, and runs before the module.
 

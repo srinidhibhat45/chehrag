@@ -1,29 +1,24 @@
 /**
- * Search structure for user-added sources.
+ * Search structure for user-added sources. Flat, not IVF.
  *
- * Flat rather than IVF. `retrieval/ivf.ts` exists because 810k corpus chunks
- * cannot be scanned inside the budget; user sources are three or four orders of
- * magnitude smaller, and clustering them would mean running k-means in the
- * browser on every document added — seconds of work to save microseconds of
- * query, plus a recall loss on the corpus the user cares most about.
+ * IVF exists because 810k corpus chunks cannot be scanned inside the budget.
+ * User sources are orders of magnitude smaller, and clustering them means
+ * running k-means in the browser on every document added: seconds of work to
+ * save microseconds of query.
  *
- * What is load-bearing for P100: a flat scan is O(n) in a number the user
- * controls, so it is hard-capped. Beyond `maxScan` chunks the index stops
- * looking and reports that it did.
+ * A flat scan is O(n) in a number the user controls, so it is hard-capped.
+ * Past `maxScan` chunks it stops and says so.
  *
- * Results come back bucketed by chunking strategy, matching the shape the corpus
- * indices return, because fusion weights are per-strategy — a `document` hit and
- * a `whole` hit are not worth the same.
- *
- * Layout and scoring match the corpus index exactly — same PCA space, same
- * sign-bit binarisation, same int8 rescoring — so hits from both fuse without
- * per-source normalisation.
+ * Results come back bucketed by strategy to match the corpus indices, because
+ * fusion weights are per-strategy. Layout and scoring are identical to the
+ * corpus side - same PCA space, same sign bits, same int8 rescore - so both
+ * fuse without per-source normalisation.
  */
 
 import type { Strategy } from "./chunk";
 
 /** Ceiling on chunks scanned per query. At 8 words per code this is ~1.2M
- *  popcounts, measured at ~2ms — inside the retrieve stage's 80ms budget with
+ *  popcounts, measured at ~2ms - inside the retrieve stage's 80ms budget with
  *  room for the six corpus indices alongside. */
 const MAX_SCAN = 150_000;
 /** Candidate pool held during the scan. Wide enough that the rarer strategies
@@ -289,7 +284,7 @@ export class UserIndex {
     return this.out;
   }
 
-  /** int8 rescore of one user passage — the corpus rescorer's twin. */
+  /** int8 rescore of one user passage - the corpus rescorer's twin. */
   prepare(q: Float32Array): void {
     for (let i = 0; i < this.dim; i++) {
       const v = Math.round(q[i] * 127);

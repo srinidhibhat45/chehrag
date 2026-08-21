@@ -10,14 +10,14 @@
  *
  * That gap had a cost. Asked "what is the name" of a document whose first line
  * is `name: srinidhi bhat, age: 45`, the system refused. Retrieval was not the
- * problem — the correct passage came back at rank 1, found by four independent
+ * problem - the correct passage came back at rank 1, found by four independent
  * chunking strategies, sharing every content word with the question. It was
  * thrown away because its cosine was 0.263 and the rescue floor was 0.40.
  *
- * WHY THE COSINE IS LOW ON A PERFECT MATCH. e5 embeds a four-word question and
+ * The cosine is low even on a perfect match. e5 embeds a four-word question and
  * a line of form fields into vectors whose absolute similarity says more about
  * length and register than about relevance. The corpus this threshold was fitted
- * on is MS MARCO — passages written as prose, selected because they answered a
+ * on is MS MARCO - passages written as prose, selected because they answered a
  * web query. A CV line, a table row, a heading with a value after it: none of
  * them are that, and all of them are what people actually upload.
  *
@@ -73,8 +73,8 @@ payment method and take between five and seven working days to appear.
 Items marked as final sale cannot be returned or exchanged under any
 circumstances. This includes clearance stock and personalised goods.
 
-Shipping charges are not refundable. If a return is the result of our error — a
-damaged item, or the wrong item shipped — we cover return postage and refund the
+Shipping charges are not refundable. If a return is the result of our error - a
+damaged item, or the wrong item shipped - we cover return postage and refund the
 original shipping cost in full.
 
 To start a return, email support with your order number. Our support desk is
@@ -146,12 +146,12 @@ const BASE = { minTopScore: 0.4788, minAgreement: 1, minLexicalOverlap: 0 };
 const RULES: Rule[] = [
   {
     name: "shipped",
-    note: "rescue floor 0.40, overlap 0.5 — what shipped before",
+    note: "rescue floor 0.40, overlap 0.5 - what shipped before",
     thresholds: { ...BASE, rescueMinScore: 0.40, rescueMinOverlap: 0.5 },
   },
   {
     name: "no rescue",
-    note: "absolute cosine only — what the corpus path does",
+    note: "absolute cosine only - what the corpus path does",
     thresholds: { ...BASE, rescueMinScore: Infinity, rescueMinOverlap: 1 },
   },
   {
@@ -161,7 +161,7 @@ const RULES: Rule[] = [
   },
   {
     name: "floor 0.20",
-    note: "same rule, lower floor — SHIPPING",
+    note: "same rule, lower floor - SHIPPING",
     thresholds: { ...BASE, rescueMinScore: 0.20, rescueMinOverlap: 0.5 },
   },
   {
@@ -176,7 +176,7 @@ const RULES: Rule[] = [
   },
   {
     name: "floor 0.00",
-    note: "overlap alone decides — no cosine floor at all",
+    note: "overlap alone decides - no cosine floor at all",
     thresholds: { ...BASE, rescueMinScore: 0, rescueMinOverlap: 0.5 },
   },
 ];
@@ -211,7 +211,7 @@ await store.addPaste(POLICY, "refund-policy.txt");
 /**
  * The gate is evaluated offline rather than by re-running the engine per rule.
  * Retrieval is deterministic given the query, so the signals are collected once
- * and every candidate rule is scored against the same numbers — which is both
+ * and every candidate rule is scored against the same numbers - which is both
  * ~7x faster and, more importantly, means the rules are compared on identical
  * retrieval rather than on seven separate runs of it.
  */
@@ -224,7 +224,7 @@ const engine = new RagEngine(index, enc, {
 });
 // The engine now defaults the shipped corpus ON, because the app must answer
 // from the provided dataset the moment it opens. This bench measures the *user
-// source* gate specifically, so it opts out explicitly — otherwise corpus
+// source* gate specifically, so it opts out explicitly - otherwise corpus
 // passages join the ranking, the rescue is disabled for the ones that win, and
 // the numbers below quietly stop being about the thing being fitted. (They did:
 // coverage read 64% instead of 88% until this line existed.)
@@ -243,7 +243,7 @@ function evaluate(rule: Rule) {
   let ansTotal = 0, ansPassed = 0, unaTotal = 0, unaRefused = 0;
   const wrong: string[] = [];
   for (const { q, signals } of rows) {
-    // No signals at all means retrieval returned nothing — a refusal under
+    // No signals at all means retrieval returned nothing - a refusal under
     // every rule.
     const pass = signals ? gateRetrieval(signals, rule.thresholds).pass : false;
     if (q.answerable) {
@@ -262,7 +262,7 @@ function evaluate(rule: Rule) {
 }
 
 console.log("=".repeat(78));
-console.log(`GATE 2 ON USER SOURCES — ${QUESTIONS.filter(q => q.answerable).length} answerable, ` +
+console.log(`GATE 2 ON USER SOURCES - ${QUESTIONS.filter(q => q.answerable).length} answerable, ` +
             `${QUESTIONS.filter(q => !q.answerable).length} unanswerable, over 2 documents`);
 console.log("=".repeat(78));
 console.log("");
@@ -283,7 +283,7 @@ console.log("\n" + "-".repeat(78));
 console.log("SIGNALS PER QUESTION (topScore / overlap / agreement / margin)");
 console.log("-".repeat(78));
 for (const { q, signals } of rows) {
-  if (!signals) { console.log(`  ${q.answerable ? "A" : "U"}  —  no retrieval  ${q.q}`); continue; }
+  if (!signals) { console.log(`  ${q.answerable ? "A" : "U"}  -  no retrieval  ${q.q}`); continue; }
   console.log(
     `  ${q.answerable ? "A" : "U"}  ` +
     `${signals.topScore.toFixed(3)}  ${signals.lexicalOverlap.toFixed(2)}  ` +

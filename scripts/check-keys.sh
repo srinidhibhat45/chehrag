@@ -23,17 +23,17 @@ read_key() {   # $1 file  $2 KEY
 
 ok()   { printf '  %s✓%s %s\n' "$grn" "$off" "$1"; }
 bad()  { printf '  %s✗%s %s\n' "$red" "$off" "$1"; FAILED=1; }
-skip() { printf '  %s—%s %s\n' "$dim" "$off" "$1"; }
+skip() { printf '  %s-%s %s\n' "$dim" "$off" "$1"; }
 
 FAILED=0
-echo "${bold}Chehrag — key check${off}"
+echo "${bold}Chehrag - key check${off}"
 
 # --- Groq --------------------------------------------------------------------
 echo
-echo "${bold}Groq${off} ${dim}— writes the answers${off}"
+echo "${bold}Groq${off} ${dim}- writes the answers${off}"
 GROQ="$(read_key web/.env.local GROQ_API_KEY)"
 if [ -z "${GROQ:-}" ]; then
-  skip "not set — the app will quote passages instead of answering"
+  skip "not set - the app will quote passages instead of answering"
   echo "    ${dim}fix: ./scripts/setup-keys.sh groq${off}"
 else
   # A real one-token generation, not just /models: it proves the key can do the
@@ -48,10 +48,10 @@ else
   code=$(printf '%s' "$body" | tail -1)
   case "$code" in
     200) ok "key works · model $MODEL · ${ms} ms round trip" ;;
-    401|403) bad "key rejected (HTTP $code) — wrong or revoked key" ;;
+    401|403) bad "key rejected (HTTP $code) - wrong or revoked key" ;;
     404) bad "model '$MODEL' not available to this key (HTTP 404)"
          echo "    ${dim}see https://console.groq.com/docs/models${off}" ;;
-    429) bad "rate limited (HTTP 429) — free tier is 30 req/min" ;;
+    429) bad "rate limited (HTTP 429) - free tier is 30 req/min" ;;
     *)   bad "HTTP $code"
          printf '%s' "$body" | head -c 200 | sed 's/^/    /' ;;
   esac
@@ -61,7 +61,7 @@ fi
 ANTH="$(read_key web/.env.local ANTHROPIC_API_KEY)"
 if [ -n "${ANTH:-}" ]; then
   echo
-  echo "${bold}Anthropic${off} ${dim}— alternative answer writer${off}"
+  echo "${bold}Anthropic${off} ${dim}- alternative answer writer${off}"
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
     https://api.anthropic.com/v1/messages \
     -H "x-api-key: $ANTH" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
@@ -71,10 +71,10 @@ fi
 
 # --- Sarvam ------------------------------------------------------------------
 echo
-echo "${bold}Sarvam${off} ${dim}— speech in, and Indic speech out${off}"
+echo "${bold}Sarvam${off} ${dim}- speech in, and Indic speech out${off}"
 SARVAM="$(read_key worker/.dev.vars SARVAM_API_KEY)"
 if [ -z "${SARVAM:-}" ]; then
-  skip "not set — voice input falls back to the browser's own recogniser"
+  skip "not set - voice input falls back to the browser's own recogniser"
   echo "    ${dim}fix: ./scripts/setup-keys.sh sarvam${off}"
 else
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 \
@@ -84,16 +84,16 @@ else
   case "$code" in
     200) ok "key works" ;;
     401|403) bad "key rejected (HTTP $code)" ;;
-    *)   bad "HTTP $code — reachable but the test call failed" ;;
+    *)   bad "HTTP $code - reachable but the test call failed" ;;
   esac
 fi
 
 # --- ElevenLabs --------------------------------------------------------------
 echo
-echo "${bold}ElevenLabs${off} ${dim}— spoken answers in English, Hindi, Tamil${off}"
+echo "${bold}ElevenLabs${off} ${dim}- spoken answers in English, Hindi, Tamil${off}"
 ELEVEN="$(read_key worker/.dev.vars ELEVENLABS_API_KEY)"
 if [ -z "${ELEVEN:-}" ]; then
-  skip "not set — answers are spoken by Sarvam or the browser voice"
+  skip "not set - answers are spoken by Sarvam or the browser voice"
   echo "    ${dim}fix: ./scripts/setup-keys.sh elevenlabs${off}"
 else
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \

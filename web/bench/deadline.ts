@@ -61,7 +61,7 @@ function loadQueries(): string[] {
  * The thresholds the deployed app uses, not `DEFAULT_THRESHOLDS`.
  *
  * The defaults are a conservative placeholder for the case where calibration has
- * never run, and against them the corpus refuses nearly every query — which
+ * never run, and against them the corpus refuses nearly every query - which
  * would leave this measuring kept@3 over a sample of about four.
  */
 function fittedConfig() {
@@ -77,7 +77,7 @@ function fittedConfig() {
       },
     };
   } catch {
-    console.warn("! thresholds.json missing — run bench/calibrate.ts first.");
+    console.warn("! thresholds.json missing - run bench/calibrate.ts first.");
     console.warn("! Falling back to conservative defaults; kept@3 will be near-meaningless.\n");
     return DEFAULT_CONFIG;
   }
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   console.log(`\nthresholds : minTopScore ${base.thresholds.minTopScore} ` +
               `minAgreement ${base.thresholds.minAgreement}`);
 
-  console.log(`\nDEADLINE STRESS  —  n=${queries.length} queries per budget\n`);
+  console.log(`\nDEADLINE STRESS  -  n=${queries.length} queries per budget\n`);
   console.log("Shrinking the budget on a fast machine reproduces what a slow one");
   console.log("hits at 200ms. The plan should shrink to fit; latency should follow.\n");
 
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     engine.setCorpusEnabled(true);   // the corpus is what this measures
     await engine.warmup();
     // Extra warming per engine. Each budget gets a fresh RagEngine, and a fresh
-    // engine's first few queries run interpreted — without this the P100 column
+    // engine's first few queries run interpreted - without this the P100 column
     // measures this harness warming up rather than the deadline logic working.
     for (let i = 0; i < 25; i++) await engine.ask(queries[i % queries.length], { skipCache: true });
 
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   console.log("\nover     : queries whose total exceeded that run's own budget");
   console.log("degraded : share where budgetPlan reduced the retrieval plan");
   console.log("kept@3   : share still returning a citation the 200ms run also returned");
-  console.log("n        : denominator for kept@3 — queries the 200ms run answered");
+  console.log("n        : denominator for kept@3 - queries the 200ms run answered");
 
   const claim = BUDGETS[0];
   const claimHeld = !breached.includes(claim);
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
     console.log(`  breached at      : ${breached.map((b) => `${b}ms`).join(", ")}`);
   }
   console.log("\nBelow ~10ms the budget is smaller than one embedding forward pass on");
-  console.log("this machine, so no retrieval plan can recover it — that is the floor of");
+  console.log("this machine, so no retrieval plan can recover it - that is the floor of");
   console.log("the technique, not a bug in the deadline logic. It is reported rather");
   console.log("than trimmed off the bottom of the table.\n");
 }

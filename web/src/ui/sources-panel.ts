@@ -1,7 +1,7 @@
 /**
  * The sources rail.
  *
- * Three ways in — paste, file, link — and one list out. The list reports how
+ * Three ways in - paste, file, link - and one list out. The list reports how
  * many passages and chunks each source produced, because "added successfully"
  * says nothing about whether a dropped PDF had a text layer.
  *
@@ -144,7 +144,7 @@ export class SourcesPanel {
     this.clearError();
     const label = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "Adding…";
+    btn.textContent = "Adding...";
     try {
       await fn();
       ok();

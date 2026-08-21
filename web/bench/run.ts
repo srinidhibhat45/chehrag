@@ -1,5 +1,5 @@
 /**
- * Latency and quality benchmark — P50 / P70 / P100, retrieval quality, and the
+ * Latency and quality benchmark - P50 / P70 / P100, retrieval quality, and the
  * guardrail split.
  *
  * Runs the same modules the browser runs (`assembleIndex` -> `RagEngine`) with
@@ -58,7 +58,7 @@ function fmt(p: Record<string, number>): string {
 
 async function main() {
   if (!existsSync(join(INDEX_DIR, "manifest.json"))) {
-    console.error(`no index at ${INDEX_DIR} — run pipeline/src/build_index.py first`);
+    console.error(`no index at ${INDEX_DIR} - run pipeline/src/build_index.py first`);
     process.exit(1);
   }
 
@@ -67,7 +67,7 @@ async function main() {
   const loadMs = performance.now() - t0;
 
   console.log("=".repeat(74));
-  console.log("VOICE RAG — BENCHMARK");
+  console.log("VOICE RAG - BENCHMARK");
   console.log("=".repeat(74));
   console.log(`index      : ${manifest.numPassages.toLocaleString()} passages, ` +
               `${Object.keys(manifest.strategies).length} strategies, dim ${manifest.dim}`);
@@ -98,10 +98,10 @@ async function main() {
     cfg = { ...cfg, thresholds: { ...cfg.thresholds,
                                   minTopScore: th.minTopScore, minAgreement: th.minAgreement,
                                   minLexicalOverlap: th.minLexicalOverlap ?? 0 } };
-    console.log(`thresholds : fitted — minTopScore ${th.minTopScore} minAgreement ${th.minAgreement}`);
+    console.log(`thresholds : fitted - minTopScore ${th.minTopScore} minAgreement ${th.minAgreement}`);
   } catch { console.log("thresholds : defaults (calibration not run)"); }
   const engine = new RagEngine(index, enc, cfg);
-  // The engine ships with the corpus off — the app starts empty so that an
+  // The engine ships with the corpus off - the app starts empty so that an
   // answer can only have come from what the user added. Every benchmark here
   // exists to measure that corpus, so it opts in explicitly.
   engine.setCorpusEnabled(true);
@@ -173,7 +173,7 @@ async function main() {
     console.log(`  hit@1      : ${(hit1 / gradedAnswerable).toFixed(4)}`);
     console.log(`  hit@3      : ${(hit5 / gradedAnswerable).toFixed(4)}   (3 citations returned)`);
   } else {
-    console.log("  no answerable queries were answered — thresholds may be too strict");
+    console.log("  no answerable queries were answered - thresholds may be too strict");
   }
 
   console.log("\n" + "-".repeat(74));

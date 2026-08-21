@@ -1,25 +1,23 @@
 /**
- * The RAG pipeline, expressed as harness stages.
+ * The RAG pipeline as harness stages.
  *
- * Everything here is inside the 200ms budget. LLM synthesis is not: it runs
- * afterwards, off the clock, and replaces the extractive answer in the UI only
- * once it arrives and passes the grounding gate.
+ * Everything here is inside the 200ms budget. Synthesis is not: it runs
+ * afterwards and replaces the extractive answer only once it arrives and passes
+ * the grounding gate.
  *
- * Stage budgets sit well above measured cost so a slow machine degrades rather
- * than failing. The global budget is what enforces the cap, and `deadline.ts`
- * makes it hard rather than aspirational: when time runs short the retrieval
- * stage reduces its own work instead of overrunning.
+ * Stage budgets sit well above measured cost so a slow machine degrades instead
+ * of failing, and `deadline.ts` makes the global budget hard rather than
+ * aspirational by shrinking the retrieval plan when time runs short.
  *
- * Two corpora, one ranking. The shipped MS MARCO index and the user's sources
- * are searched separately — IVF versus flat — but their hits fuse in a single
- * RRF pass under one calibrated confidence. That only holds because both sides
- * quantise identically; see `sources/quantise.ts`.
+ * The shipped index and the user's sources are searched separately, IVF against
+ * flat, but their hits fuse in one RRF pass under one calibrated confidence.
+ * That only works because both sides quantise identically (`sources/quantise.ts`).
  */
 
 import { Pipeline, type StageTelemetry } from "./pipeline";
 import { budgetPlan, type RetrievalPlan } from "./deadline";
 import type { LoadedIndex } from "../retrieval/loader";
-import { fuse, fusionMargin, lexicalOverlap, type FusedHit, type StrategyHits } from "../retrieval/fusion";
+import { Fuser, fusionMargin, lexicalOverlap, type FusedHit, type StrategyHits } from "../retrieval/fusion";
 import type { SourceStore } from "../sources/store";
 import {
   gateInput, gateRetrieval, gateGrounding, gateCitations, DEFAULT_THRESHOLDS,
@@ -74,7 +72,7 @@ export interface RagAnswer {
    * Fused passage ids in rank order, populated whether or not the answer
    * survived the guardrails.
    *
-   * `citations` is empty on a refusal — the user must not be shown evidence for
+   * `citations` is empty on a refusal - the user must not be shown evidence for
    * an answer that was declined. Evaluation needs the opposite: "found it and
    * the gate rejected it" and "never found it" are different failures, and
    * `citations` alone cannot distinguish them.
@@ -90,6 +88,15 @@ export interface RagConfig {
   perStrategyK: number;
   fuseTopN: number;
   rescoreTopN: number;
+  /**
+   * Candidates each index may scan before it stops.
+   *
+   * The ceiling on work per query, and the reason P100 is flat: without it,
+   * cost is set by how densely populated the clusters a query happens to land
+   * in are. Swept against retrieval quality - at nprobe 24 raising it from
+   * 3072 to 6144 moved hit@5 from 62.4% to 64.1%, and 9216 added nothing.
+   */
+  maxCandidates: number;
   thresholds: ConfidenceThresholds;
   globalBudgetMs: number;
   /**
@@ -103,11 +110,19 @@ export interface RagConfig {
   enabledStrategies?: string[] | null;
 }
 
+/**
+ * Swept against retrieval quality on 415 answerable queries, graded on rank
+ * before the guardrails so a setting cannot flatter itself by moving queries
+ * across gate 2's threshold. nprobe saturates at 24 and the candidate cap at
+ * 6144; both were raised from the point where the cost curve is still flat,
+ * because after the search was rewritten there was budget to spend on recall.
+ */
 export const DEFAULT_CONFIG: RagConfig = {
-  nprobe: 12,
+  nprobe: 24,
   perStrategyK: 24,
   fuseTopN: 24,
   rescoreTopN: 16,
+  maxCandidates: 6144,
   thresholds: DEFAULT_THRESHOLDS,
   globalBudgetMs: 200,
   enabledStrategies: null,
@@ -115,8 +130,13 @@ export const DEFAULT_CONFIG: RagConfig = {
 
 /**
  * Warm-up set: both scripts, short and long, question and fragment.
- * Deliberately not real corpus queries — the cache is cleared afterwards, but
- * warming on real questions would make the first genuine ask artificially fast.
+ *
+ * Not real corpus queries. The cache is cleared afterwards, but warming on a
+ * real question would make the first genuine ask artificially fast.
+ *
+ * The last two run at the clamp length on purpose. The ONNX graph sizes its
+ * buffers to the longest sequence it has seen, so without them the first long
+ * question of a session pays for that allocation and sets P100 on its own.
  */
 const WARMUP_QUERIES = [
   "what is a corporation",
@@ -127,24 +147,31 @@ const WARMUP_QUERIES = [
   "who",
   "a somewhat longer question with a number 1947 and a Latin acronym NATO in it",
   "एक लंबा प्रश्न जिसमें संख्या 2024 और अंग्रेज़ी शब्द hospital शामिल है",
+  "a deliberately long question that runs to the clamp so the encoder allocates " +
+  "its widest buffers during warm-up rather than during somebody's first real " +
+  "question about a certification process, a hospital admission in 1947, or the " +
+  "financial statements of an organisation with a NATO contract attached",
+  "यह एक जानबूझकर लंबा प्रश्न है जो अधिकतम लंबाई तक जाता है ताकि एनकोडर अपने सबसे " +
+  "बड़े बफ़र वार्म-अप के दौरान आवंटित करे, न कि किसी उपयोगकर्ता के पहले वास्तविक " +
+  "प्रश्न के दौरान, जैसे किसी संगठन के वित्तीय विवरण, अस्पताल में भर्ती, या 1947 " +
+  "के किसी ऐतिहासिक अनुबंध के बारे में",
 ];
 
 /**
  * Hard ceiling on the text handed to the encoder.
  *
- * Embedding is the one stage whose cost is set by the input rather than by the
- * corpus, and it is paid before the deadline planner runs — so a long enough
- * query blows the budget with nothing left to degrade. The bound has to be
- * applied before the cost is incurred.
+ * Embedding is the one stage whose cost comes from the input rather than the
+ * corpus, and it is paid before the deadline planner runs, so a long enough
+ * query blows the budget with nothing left to degrade.
  *
- * Set from measurement rather than from the model's 512-token limit: characters
- * and tokens diverge across scripts (e5 tokenises Devanagari far better than
- * Assamese or Kannada) and attention is quadratic in tokens. At 512 characters
- * the slowest script sits on the embed stage's 60 ms budget and times out; 320
- * leaves about a third of it spare while still being 4.5x the p99 real query.
+ * Set by measurement, not by the model's 512-token limit: characters and tokens
+ * diverge across scripts (e5 tokenises Devanagari far better than Assamese or
+ * Kannada) and attention is quadratic in tokens. At 512 characters the slowest
+ * script sits on the embed budget and times out. 320 leaves a third spare and
+ * is still 4.5x the p99 real query.
  *
- * Truncating rather than refusing: answering the first part of a rambling
- * spoken question beats declining all of it. It is reported when it fires.
+ * Truncate rather than refuse: answering the first part of a rambling spoken
+ * question beats declining all of it. Reported when it fires.
  */
 export const MAX_QUERY_CHARS = 320;
 
@@ -195,6 +222,12 @@ export class RagEngine {
    * reported number.
    */
   private corpusEnabled = true;
+
+  /** Resolves when the query currently running finishes. See `ask`. */
+  private inFlight: Promise<void> | null = null;
+
+  /** Holds its own working set; see `retrieval/fusion.ts`. */
+  private readonly fuser = new Fuser();
 
   constructor(
     private readonly index: LoadedIndex,
@@ -257,7 +290,7 @@ export class RagEngine {
    * unwarmed first query costs ~20ms of embed against ~6ms warm.
    *
    * Two scripts and a range of lengths, because the graph specialises on
-   * tokenisation and sequence length — warming only on short ASCII leaves the
+   * tokenisation and sequence length - warming only on short ASCII leaves the
    * Devanagari path cold. Costs ~150ms of a multi-second load.
    */
   async warmup(samples: string[] = WARMUP_QUERIES): Promise<void> {
@@ -283,6 +316,24 @@ export class RagEngine {
       if (hit) return { ...hit, cached: true };
     }
 
+    // One query at a time. Scratch buffers are shared across stages and across
+    // the indices, and speculative retrieval on a partial transcript is often
+    // still running when the final transcript arrives. Queueing costs a
+    // microtask; overlapping would let one query embed into another's vector.
+    const prev = this.inFlight;
+    let release!: () => void;
+    this.inFlight = new Promise<void>((r) => { release = r; });
+    if (prev) {
+      try { await prev; } catch { /* the previous query's failure is its own */ }
+    }
+    try {
+      return await this.runQuery(query, key);
+    } finally {
+      release();
+    }
+  }
+
+  private async runQuery(query: string, key: string): Promise<RagAnswer> {
     const pipe = new Pipeline(this.cfg.globalBudgetMs);
     const idx = this.index;
     const cfg = this.cfg;
@@ -302,7 +353,7 @@ export class RagEngine {
     let rescored = false;
     let plan: RetrievalPlan = {
       nprobe: cfg.nprobe, perStrategyK: cfg.perStrategyK,
-      rescoreTopN: cfg.rescoreTopN, degraded: false,
+      rescoreTopN: cfg.rescoreTopN, maxCandidates: cfg.maxCandidates, degraded: false,
     };
 
     pipe
@@ -319,8 +370,8 @@ export class RagEngine {
             refusal = {
               pass: false,
               reason: "NO_SOURCES",
-              message: "There's nothing to search yet. Add a source — paste some " +
-                       "text, drop a file, or add a link — and I'll answer from it.",
+              message: "There's nothing to search yet. Add a source - paste some " +
+                       "text, drop a file, or add a link - and I'll answer from it.",
             };
           }
           // Clamped here rather than in `gateInput`, which answers yes/no and
@@ -359,7 +410,7 @@ export class RagEngine {
         budgetMs: 80,
         run: (q, ctx) => {
           if (refusal) return q;
-          // Embedding is the variable cost — up to 10x on a slow phone — so
+          // Embedding is the variable cost - up to 10x on a slow phone - so
           // retrieval sizes itself against what is left rather than against
           // what it would prefer.
           plan = budgetPlan(ctx.remaining(), cfg, store?.activeChunks ?? 0);
@@ -370,14 +421,14 @@ export class RagEngine {
           if (this.corpusEnabled) {
             for (const [name, ix] of idx.indices) {
               if (!on(name)) continue;
-              const r = ix.search(qv, plan.nprobe, plan.perStrategyK);
+              const r = ix.search(qv, plan.nprobe, plan.perStrategyK, plan.maxCandidates);
               if (r.n > 0) {
                 hits.push({ strategy: name, parentIds: r.parentIds, scores: r.scores, n: r.n });
               }
             }
             // BM25 over the same passages. It takes the query's text rather
-            // than its vector — it is the one index that never sees an
-            // embedding — and it takes the *folded* text, so a romanised Hindi
+            // than its vector - it is the one index that never sees an
+            // embedding - and it takes the folded text, so a romanised Hindi
             // question looks up Devanagari terms like any other.
             if (idx.lexical && on("lexical")) {
               const r = idx.lexical.search(contentTokens(q), plan.perStrategyK);
@@ -399,7 +450,7 @@ export class RagEngine {
               hits.push({ strategy: b.strategy, parentIds: ids, scores: b.scores, n: b.n });
             }
           }
-          fused = fuse(hits, cfg.fuseTopN);
+          fused = this.fuser.fuse(hits, cfg.fuseTopN);
           return q;
         },
       })
@@ -430,7 +481,8 @@ export class RagEngine {
               ? (store?.rescore(pid - USER_BASE) ?? 0)
               : idx.rescorer.score(pid);
           }
-          fused = fused.slice(0, n).sort((a, b) => b.bestRawScore - a.bestRawScore);
+          fused.length = n;
+          fused.sort((a, b) => b.bestRawScore - a.bestRawScore);
           rescored = true;
           return q;
         },
@@ -470,7 +522,7 @@ export class RagEngine {
             : { ...cfg.thresholds, minTopScore: -Infinity, rescueMinScore: Infinity };
           if (!rescored) {
             plan = { ...plan, degraded: true,
-                     reason: "rescore skipped — confidence is uncalibrated" };
+                     reason: "rescore skipped - confidence is uncalibrated" };
           }
 
           signals = {
@@ -494,7 +546,7 @@ export class RagEngine {
             passageId: f.passageId,
             text: this.textOf(f.passageId),
             score: f.bestRawScore,
-            strategies: Object.keys(f.perStrategyRank),
+            strategies: this.fuser.strategiesOf(f),
             source: this.sourceOf(f.passageId),
           }));
           return q;
@@ -510,7 +562,7 @@ export class RagEngine {
         ...plan,
         degraded: true,
         reason: `question truncated from ${truncatedFrom} to ${MAX_QUERY_CHARS} characters ` +
-                `before embedding — only the first part was searched`,
+                `before embedding - only the first part was searched`,
       };
     }
 
@@ -573,18 +625,14 @@ export class RagEngine {
   invalidate(): void { this.cache.clear(); }
 
   /**
-   * Retrieval on behalf of the model's `search_corpus` tool.
+   * Retrieval for the model's `search_corpus` tool.
    *
-   * Runs the ordinary pipeline — same budget, same deadline planner, same
-   * degradation — and then reads `retrieved` rather than `citations`, because
-   * the guardrails' opinion of the *model's* rephrasing is not the question
-   * being asked here. Gate 2 decides whether an answer reaches the user; this
-   * is the model asking to look something up, and its output is checked again
-   * by gate 3 before any of it is shown.
+   * The ordinary pipeline, then `retrieved` rather than `citations`. Gate 2
+   * decides whether an answer reaches the user; this is the model asking to
+   * look something up, and what it gets back is checked by gate 3 anyway.
    *
    * Passages already in front of the model are excluded, so a rephrasing that
-   * finds the same thing costs a round trip rather than filling the context
-   * with duplicates.
+   * finds the same thing costs a round trip rather than duplicate context.
    */
   async searchAgain(query: string, exclude: Set<number>, k = 3): Promise<Citation[]> {
     const r = await this.ask(query, { skipCache: true });
@@ -610,16 +658,13 @@ export class RagEngine {
   /**
    * Gate 3 over a tool-call answer, where the model named its sources.
    *
-   * Two checks in order. The citations must point at excerpts that were
-   * actually supplied — an index outside the set is a fabricated citation, and
-   * it fails whatever the prose says. Then grounding is measured against *those
-   * excerpts only*, which is a strictly harder test than the old one: an answer
-   * written from excerpt 1 while citing excerpt 3 used to pass on the union and
-   * now does not.
+   * Citations first: an index outside the supplied set is a fabricated
+   * citation and fails whatever the prose says. Then grounding, measured
+   * against those excerpts only, which is stricter than checking the union - an
+   * answer written from excerpt 1 while citing excerpt 3 no longer passes.
    *
-   * With no citations at all — a provider that ignored the field — it degrades
-   * to checking against everything supplied, and says so by way of the
-   * `checkedAgainst` detail rather than silently.
+   * A provider that ignores the field degrades to checking everything supplied
+   * and records that in `checkedAgainst` rather than doing it silently.
    */
   verifyGenerated(
     answer: string,

@@ -2,22 +2,22 @@
  * End-to-end voice latency: spoken question in, grounded answer out.
  *
  * Everywhere else in this project the 200 ms figure covers retrieval, and the
- * README argues at length why speech-to-text cannot be inside it — the fastest
+ * README argues at length why speech-to-text cannot be inside it - the fastest
  * streaming STT on the market spends 150 ms of a 200 ms budget on its own. That
  * argument is sound and it is still an argument. This is the measurement.
  *
  * Method, and its one real weakness stated first:
  *
  *   The audio is synthesised. Real questions are spoken by people in rooms with
- *   traffic outside, and TTS audio is cleaner than that. So the *accuracy*
+ *   traffic outside, and TTS audio is cleaner than that. So the accuracy
  *   numbers below are optimistic and are reported as a sanity check rather than
- *   as a claim about transcription quality in the wild. The *latency* numbers
+ *   as a claim about transcription quality in the wild. The latency numbers
  *   are not flattered in the same way: Sarvam is transcribing a real audio file
  *   of a real length over a real network, and that is what the clock measures.
  *
  *   1. Sarvam `bulbul:v2` speaks each Hindi query          (setup, not measured)
- *   2. that audio goes to Sarvam `saaras:v3`               (measured — network)
- *   3. the transcript runs through the shipped pipeline    (measured — local)
+ *   2. that audio goes to Sarvam `saaras:v3`               (measured - network)
+ *   3. the transcript runs through the shipped pipeline    (measured - local)
  *
  * Reported as three distributions rather than one, because they are three
  * different kinds of cost and only one of them is ours to control. Adding them
@@ -26,7 +26,7 @@
  *
  * Batch STT is the honest choice for a measurement, and it is also the slower
  * one. In the app the socket is already open and partial transcripts arrive
- * *during* speech, so the wait a user experiences after they stop talking is
+ * during speech, so the wait a user experiences after they stop talking is
  * shorter than this. A number measured on the streaming path would depend on
  * how long the speaker talked, which is not a property of this system.
  *
@@ -128,7 +128,7 @@ async function main() {
   const env = { ...process.env, ...(dotenv("../worker/.dev.vars") ?? {}), ...(dotenv(".env.local") ?? {}) };
   const key = (env.SARVAM_API_KEY ?? "").trim();
   if (!key) {
-    console.error("no SARVAM_API_KEY — put one in worker/.dev.vars");
+    console.error("no SARVAM_API_KEY - put one in worker/.dev.vars");
     process.exit(1);
   }
 
@@ -150,10 +150,10 @@ async function main() {
   const sample = all.filter((q: { answerable: boolean }) => q.answerable).slice(50, 50 + LIMIT);
 
   console.log("=".repeat(76));
-  console.log("END-TO-END VOICE — spoken question to grounded answer");
+  console.log("END-TO-END VOICE - spoken question to grounded answer");
   console.log("=".repeat(76));
   console.log(`stt        : Sarvam saaras:v3 (batch), over the network`);
-  console.log(`audio      : synthesised by Sarvam bulbul:v2 — see the header of this file`);
+  console.log(`audio      : synthesised by Sarvam bulbul:v2 - see the header of this file`);
   console.log(`queries    : ${sample.length}\n`);
 
   const sttMs: number[] = [];
@@ -182,7 +182,7 @@ async function main() {
   }
 
   if (!totalMs.length) {
-    console.log("\n\nno successful runs — check the Sarvam key and quota");
+    console.log("\n\nno successful runs - check the Sarvam key and quota");
     process.exit(1);
   }
 
@@ -205,12 +205,12 @@ async function main() {
   const sp = percentiles(sttMs);
   console.log("-".repeat(76));
   console.log(`  retrieval under 200 ms : ${(100 * ragMs.filter((t) => t < 200).length / ragMs.length).toFixed(1)}%` +
-              `   (P100 ${rp.p100.toFixed(1)} ms — the figure the app reports)`);
+              `   (P100 ${rp.p100.toFixed(1)} ms - the figure the app reports)`);
   console.log(`  STT share of the total : ${(100 * sp.p50 / tp.p50).toFixed(1)}% at P50`);
   console.log(`  audio                  : ${(audioBytes / Math.max(1, totalMs.length) / 1024).toFixed(0)} KB per question`);
 
   console.log("\n" + "-".repeat(76));
-  console.log("TRANSCRIPTION  (sanity check — synthesised audio, see file header)");
+  console.log("TRANSCRIPTION  (sanity check - synthesised audio, see file header)");
   console.log("-".repeat(76));
   const op = percentiles(overlaps.map((o) => o * 100));
   console.log(`  content-word overlap   : median ${op.p50.toFixed(0)}%  mean ${op.mean.toFixed(0)}%`);

@@ -9,11 +9,11 @@
  *
  * Measured on retrieval, not on answers. `RagAnswer.retrieved` is populated
  * whether or not the guardrails let the answer through, so removing an index
- * cannot flatter itself by shifting queries across the gate-2 threshold — which
+ * cannot flatter itself by shifting queries across the gate-2 threshold - which
  * is exactly what would happen if this graded citations. Answer rate is
  * reported alongside, as a separate column, for the same reason.
  *
- * Reading it: a strategy earns its place if removing it *costs* recall. A row
+ * Reading it: a strategy earns its place if removing it costs recall. A row
  * whose delta is zero or positive is a strategy paying for itself in download
  * size and query time and returning nothing.
  */
@@ -117,7 +117,7 @@ async function main() {
   } catch { /* defaults */ }
 
   console.log("=".repeat(78));
-  console.log("INDEX ABLATION — leave one out");
+  console.log("INDEX ABLATION - leave one out");
   console.log("=".repeat(78));
   console.log(`indices    : ${strategies.join(", ")}`);
   console.log(`queries    : ${sample.length} answerable, graded on retrieved rank (pre-guardrail)\n`);
@@ -125,7 +125,7 @@ async function main() {
   const runs: Array<{ label: string; on: string[] | null }> = [
     { label: "ALL", on: null },
     ...strategies.map((s) => ({
-      label: `  – ${s}`, on: strategies.filter((x) => x !== s),
+      label: `  - ${s}`, on: strategies.filter((x) => x !== s),
     })),
     { label: "dense only", on: strategies.filter((s) => s !== "lexical") },
     ...(index.lexical ? [{ label: "lexical only", on: ["lexical"] }] : []),
@@ -160,7 +160,7 @@ async function main() {
       col(s.p50.toFixed(2), 9));
   }
   console.log("-".repeat(78));
-  console.log("Δhit@5 is against ALL. A NEGATIVE delta on a '– x' row means removing x");
+  console.log("Δhit@5 is against ALL. A NEGATIVE delta on a '- x' row means removing x");
   console.log("costs recall, i.e. x is earning its place.");
   console.log("=".repeat(78));
 }

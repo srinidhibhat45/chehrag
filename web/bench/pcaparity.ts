@@ -47,6 +47,6 @@ for (let n = 0; n < N; n++) {
 console.log(`worst cosine vs numpy : ${worstCos.toFixed(7)}`);
 console.log(`max abs elementwise   : ${worstAbs.toExponential(2)}`);
 console.log(worstCos > 0.99999
-  ? "PASS — JS projection matches numpy"
-  : "FAIL — projection layout differs; every query would land in the wrong space");
+  ? "PASS - JS projection matches numpy"
+  : "FAIL - projection layout differs; every query would land in the wrong space");
 if (worstCos <= 0.99999) process.exit(1);

@@ -6,7 +6,7 @@
  * its prefix is already computed.
  *
  * The API key never reaches the browser. The Worker terminates this socket and
- * opens an authenticated one upstream — browsers cannot set custom headers on a
+ * opens an authenticated one upstream - browsers cannot set custom headers on a
  * WebSocket handshake, so a proxy is required regardless of secrecy.
  *
  * Falls back to batch REST when the socket cannot be established: corporate
@@ -78,7 +78,7 @@ export class SarvamStt {
       await this.startStreaming();
       this.mode = "stream";
     } catch (err) {
-      // WebSocket blocked or upstream refused — degrade rather than fail.
+      // WebSocket blocked or upstream refused - degrade rather than fail.
       //
       // A `notice`, not an `error`: the microphone is open, batch capture is
       // about to start, and only partial transcripts are lost. An `error` here
@@ -86,7 +86,7 @@ export class SarvamStt {
       // fallback this branch has just set up.
       this.opts.onEvent({
         type: "notice",
-        message: `Live transcription unavailable (${err instanceof Error ? err.message : err}) — recording, and transcribing when you stop.`,
+        message: `Live transcription unavailable (${err instanceof Error ? err.message : err}) - recording, and transcribing when you stop.`,
       });
       this.startBatch();
       this.mode = "batch";

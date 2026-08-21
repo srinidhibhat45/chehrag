@@ -11,8 +11,8 @@ So the axes that pay on this corpus are:
   (c) changing what gets embedded  -> contextual enrichment
   (d) changing the matching rule   -> lexical BM25 alongside dense
 
-(a) through (c) live in this file. (d) is not a chunking strategy at all — it
-indexes the same unit as `whole` and changes how a match is decided — so it
+(a) through (c) live in this file. (d) is not a chunking strategy at all - it
+indexes the same unit as `whole` and changes how a match is decided - so it
 lives in `pipeline/src/lexical.py` and is fused as a seventh index.
 
 Each strategy below states what it wins and what it costs, and
@@ -26,7 +26,7 @@ the cut falls.
 
 Which is an argument for the shape of the ensemble, not against the dense
 strategies: fusion needs several imperfect voters, and the dense six are what
-make a rank agree across strategies — the signal guardrail gate 2 reads to
+make a rank agree across strategies - the signal guardrail gate 2 reads to
 decide whether a hit is real.
 """
 

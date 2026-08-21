@@ -144,7 +144,7 @@ def main() -> None:
     print(f"PCA 384->{OUT_DIM} on {sample.shape[0]:,} vectors | "
           f"retained variance {retained:.4f} | {time.perf_counter()-t0:.1f}s")
     if retained < 0.90:
-        print("  !! retained variance below 0.90 — reduction is costing recall")
+        print("  !! retained variance below 0.90 - reduction is costing recall")
     del sample
 
     manifest = {
@@ -268,7 +268,7 @@ def main() -> None:
         (out / name).write_bytes(orjson.dumps(items))
         sz = (out / name).stat().st_size
         tsz += sz
-        assert sz < 25 * 1024 * 1024, f"{name} is {sz/1e6:.1f} MB — exceeds Pages limit"
+        assert sz < 25 * 1024 * 1024, f"{name} is {sz/1e6:.1f} MB - exceeds Pages limit"
     manifest["passageShards"] = [f"passages.{k:03d}.json" for k in range(len(shards))]
     print(f"\npassage text: {tsz/1e6:.1f} MB raw across {len(shards)} shards "
           f"(max {max((out / n).stat().st_size for n in manifest['passageShards'])/1e6:.1f} MB, "

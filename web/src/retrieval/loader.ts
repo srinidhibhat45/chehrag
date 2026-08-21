@@ -3,7 +3,7 @@
  *
  * The index is ~40 MB of binary blobs, so they are cached as raw ArrayBuffers in
  * IndexedDB keyed by the manifest's build timestamp, and typed arrays are
- * created as views over those buffers — no copy, no parse.
+ * created as views over those buffers - no copy, no parse.
  *
  * None of this is on the 200ms path: load happens once at startup and the budget
  * is measured per query against a warm index.
@@ -129,13 +129,13 @@ async function fetchCached(
   }
   // `?v=<builtAt>` is what makes `Cache-Control: immutable` safe here. These
   // paths are not content-hashed, so without it a rebuilt index would keep
-  // serving stale bytes against a new manifest — vectors and text out of step,
+  // serving stale bytes against a new manifest - vectors and text out of step,
   // with no error anywhere.
   const res = await fetch(`${base}/${path}?v=${encodeURIComponent(version)}`);
   if (!res.ok) throw new Error(`failed to fetch ${path}: ${res.status}`);
   const buf = await res.arrayBuffer();
   onProgress?.(buf.byteLength, buf.byteLength, path);
-  if (db) { try { await idbPut(db, key, buf); } catch { /* quota — proceed uncached */ } }
+  if (db) { try { await idbPut(db, key, buf); } catch { /* quota - proceed uncached */ } }
   return buf;
 }
 
@@ -191,13 +191,33 @@ export function assembleIndex(
   }
 
   // Mirrors `build_index.py::project` exactly: centre, project, re-L2-normalise.
-  // A mismatch is silent — retrieval just gets worse.
+  // A mismatch is silent - retrieval just gets worse.
+  // Centring is hoisted out of the inner loop: subtracting the mean inside it
+  // repeats 384 subtractions for every one of the 256 components. Scratch is
+  // reused across calls, which is safe because the engine runs one query at a
+  // time (see `harness/rag.ts`).
+  const centred = new Float32Array(rawDim);
+  const unrolled = rawDim % 4 === 0;
+
   const projectQuery = (raw: Float32Array, out: Float32Array): void => {
+    for (let j = 0; j < rawDim; j++) centred[j] = raw[j] - pcaMean[j];
     let norm = 0;
     for (let i = 0; i < dim; i++) {
-      let s = 0;
       const off = i * rawDim;
-      for (let j = 0; j < rawDim; j++) s += pcaComp[off + j] * (raw[j] - pcaMean[j]);
+      let s = 0;
+      if (unrolled) {
+        // Four accumulators so the adds do not form a single dependency chain.
+        let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+        for (let j = 0; j < rawDim; j += 4) {
+          s0 += pcaComp[off + j] * centred[j];
+          s1 += pcaComp[off + j + 1] * centred[j + 1];
+          s2 += pcaComp[off + j + 2] * centred[j + 2];
+          s3 += pcaComp[off + j + 3] * centred[j + 3];
+        }
+        s = s0 + s1 + s2 + s3;
+      } else {
+        for (let j = 0; j < rawDim; j++) s += pcaComp[off + j] * centred[j];
+      }
       out[i] = s;
       norm += s * s;
     }
@@ -247,7 +267,7 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
   const v = manifest.builtAt;
 
   let db: IDBDatabase | null = null;
-  try { db = await openDb(); } catch { /* private mode — run uncached */ }
+  try { db = await openDb(); } catch { /* private mode - run uncached */ }
 
   const names = indexBlobNames(manifest);
   const shards = manifest.passageShards ?? ["passages.json"];
@@ -271,7 +291,7 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
     Promise.all(names.map((n) =>
       fetchCached(db, base, n, versionOf(n), (b, _t, label) => step(b, label)))),
     // Fetched in parallel, concatenated in order. Ordinals are assigned by
-    // position, so the order is load-bearing — do not sort or race.
+    // position, so the order is load-bearing - do not sort or race.
     //
     // `r.json()` rather than `r.text()` + `JSON.parse`: the text form holds a
     // 74 MB string alongside the parsed array at peak. The cost is that the

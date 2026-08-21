@@ -3,8 +3,8 @@
  *
  * The corpus never changes, so every question it can answer has one answer that
  * could have been written at build time. This runs the real pipeline over the
- * shipped query set — the same `RagEngine`, the same retrieval, the same prompt
- * out of `worker/src/synthesize.ts` — and writes the results into
+ * shipped query set - the same `RagEngine`, the same retrieval, the same prompt
+ * out of `worker/src/synthesize.ts` - and writes the results into
  * `public/answers/` for `src/answer/precomputed.ts` to read back.
  *
  * ── what parallelism actually buys, measured ─────────────────────────────
@@ -18,7 +18,7 @@
  * Where it does pay is a paid tier or a self-hosted endpoint (`LLM_BASE_URL`),
  * where the ceiling is high enough that round-trip latency is the constraint
  * again. So the scheduler below is written for that case and simply idles
- * against the limiter on the free one — `--workers` is the knob, and leaving it
+ * against the limiter on the free one - `--workers` is the knob, and leaving it
  * at 1 costs nothing on a free key.
  *
  * ── the budget is tokens, not requests ───────────────────────────────────
@@ -60,7 +60,7 @@ const RPM = argOf("--rpm", 30);
 /**
  * Measured against a free key, not taken from the docs: the model reports
  * `service tier on_demand ... tokens per minute (TPM): Limit 8000`. Requests
- * per minute are nowhere near binding at that ceiling — ~1,050 tokens a request
+ * per minute are nowhere near binding at that ceiling - ~1,050 tokens a request
  * puts the token budget at about 7 requests a minute, a quarter of the 30 rpm
  * the request limit would allow.
  */
@@ -126,7 +126,7 @@ class TokenBucket {
 const MAX_RETRIES = 5;
 
 /**
- * `synthesizeStream` never throws — it converts a provider failure into an
+ * `synthesizeStream` never throws - it converts a provider failure into an
  * `{error}` event, because the browser it was written for always has an
  * extractive answer to fall back on and would rather degrade than crash. So the
  * rate-limit case arrives here as the string `describe()` produced for it, and
@@ -252,8 +252,8 @@ async function main(): Promise<void> {
   await engine.warmup();
 
   const all: QRec[] = readFileSync(QUERIES, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  // Unanswerable queries are in the set on purpose — they are what gate 2 is
-  // calibrated on — but there is by definition no answer to precompute.
+  // Unanswerable queries are in the set on purpose - they are what gate 2 is
+  // calibrated on - but there is by definition no answer to precompute.
   const wanted = all.filter((q) => q.answerable).slice(0, LIMIT);
 
   mkdirSync(OUT_DIR, { recursive: true });
@@ -307,8 +307,8 @@ async function main(): Promise<void> {
       // would retrieve for this question.
       const r = await engine.ask(q.query, { skipCache: true });
       if (r.status !== "answered" || !r.citations.length) { refused++; continue; }
-      // A user source cannot appear here — the corpus is the only thing
-      // attached — but the id space is shared, so this is asserted rather than
+      // A user source cannot appear here - the corpus is the only thing
+      // attached - but the id space is shared, so this is asserted rather than
       // assumed.
       if (r.citations.some((c) => c.passageId >= USER_BASE)) { refused++; continue; }
 
@@ -387,7 +387,7 @@ async function main(): Promise<void> {
   // Query vectors are stored in the index's own reduced space and quantised the
   // same way passages are, so the browser matches with `PassageRescorer` and no
   // second code path exists to drift.
-  console.log(`\nembedding ${done.size.toLocaleString()} queries for lookup…`);
+  console.log(`\nembedding ${done.size.toLocaleString()} queries for lookup...`);
   const records = [...done.values()];
   const dim = manifest.dim;
   const int8 = new Int8Array(records.length * dim);
@@ -422,11 +422,11 @@ async function main(): Promise<void> {
   }, null, 2));
 
   const bytes = int8.byteLength + scales.byteLength + JSON.stringify(entries).length;
-  console.log(`\nwrote ${OUT_DIR}/ — ${records.length.toLocaleString()} answers, ` +
+  console.log(`\nwrote ${OUT_DIR}/ - ${records.length.toLocaleString()} answers, ` +
               `${(bytes / 1e6).toFixed(1)} MB`);
 }
 
-/** Minimal .env reader — this runs in Node, so the key never leaves the machine. */
+/** Minimal .env reader - this runs in Node, so the key never leaves the machine. */
 function dotenv(path: string): Record<string, string> | null {
   if (!existsSync(path)) return null;
   const out: Record<string, string> = {};

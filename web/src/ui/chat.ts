@@ -1,27 +1,21 @@
 /**
  * The conversation.
  *
- * Answers are messages in a thread rather than one result panel that gets
- * overwritten. The interesting comparisons here are between answers — this
- * question was refused and that one was not, this took 6 ms and that took 40 —
- * and a panel that replaces itself destroys the evidence for both.
+ * A thread rather than one result panel that overwrites itself, because the
+ * comparisons worth seeing are between answers: this one was refused and that
+ * one was not, this took 6 ms and that took 40.
  *
- * The bubble holds a written answer to the question, and directly under it,
- * never behind a disclosure triangle, the document that answer came from. The
- * retrieved passages sit one click below: evidence, not the answer.
+ * Each bubble carries the answer, the document it came from directly under it,
+ * and the retrieved passages one click below. The latency chip rides in the
+ * message footer rather than on a metrics screen, so it stays attached to the
+ * answer it is a fact about; expanding it shows the per-stage breakdown.
  *
- * The latency reading rides with the answer it describes, as a chip in the
- * message footer rather than on a metrics screen of its own, where it would no
- * longer be attached to the thing it is a fact about. Expanding it shows the
- * per-stage breakdown inline.
+ * Retrieval and generation are never summed. One runs in the browser under the
+ * 200 ms budget, the other is a model over the network, and a combined figure
+ * would misreport both.
  *
- * Retrieval and generation are two numbers and are never summed: retrieval runs
- * in the browser under the 200 ms budget, and the answer is written by a model
- * over the network. One combined figure would misreport both.
- *
- * Everything is built with DOM calls rather than innerHTML. Passage text is
- * corpus data and user-supplied document text, and the obvious attack on a
- * system like this is markup escaping a retrieved passage into the page.
+ * DOM calls, never innerHTML. Passage text is corpus data and user documents,
+ * and markup escaping a retrieved passage into the page is the obvious attack.
  */
 
 import type { RagAnswer } from "../harness/rag";
@@ -48,7 +42,7 @@ const REFUSAL_HINT: Record<string, string> = {
 export interface BotHandle {
   /** Replace the placeholder with the outcome of retrieval. */
   resolve(r: RagAnswer, opts: { userChunks: number; truncated: boolean; generating: boolean }): void;
-  /** First token of a generated answer has arrived — clear the waiting state. */
+  /** First token of a generated answer has arrived - clear the waiting state. */
   beginGeneration(): void;
   /** Append a fragment of the generated answer. */
   streamDelta(text: string): void;
@@ -126,7 +120,7 @@ export class Chat {
     const body = div("msg-body");
     const text = document.createElement("p");
     text.className = "answer-text";
-    text.textContent = "Looking…";
+    text.textContent = "Looking...";
     body.append(text);
     msg.append(dot, body);
     this.thread.append(msg);
@@ -206,7 +200,7 @@ export class Chat {
           chip.title =
             "This answer was written offline for the shipped corpus and stored, " +
             "so no model was called. The retrieval figure beside it is unchanged " +
-            "— that work still ran for this question.";
+            "- that work still ran for this question.";
           metaEl.insertBefore(chip, metaEl.querySelector(".meta-btn"));
         }
         addSpeakButton();
@@ -249,7 +243,7 @@ export class Chat {
     };
   }
 
-  /** A message that isn't an answer — an error, a notice. */
+  /** A message that isn't an answer - an error, a notice. */
   addNotice(text: string): void {
     this.clearWelcome();
     const msg = div("msg msg-bot");
@@ -279,7 +273,7 @@ export class Chat {
       // Retrieval is done and generation has not produced a token yet. The
       // alternative is flashing the raw passage on screen for half a second
       // before replacing it with the answer.
-      text.textContent = "Reading your sources…";
+      text.textContent = "Reading your sources...";
       text.dataset.state = "waiting";
     } else {
       text.textContent = r.answer;
@@ -336,8 +330,8 @@ export class Chat {
       el("span", "retrieval", "speed-what"),
     );
     speed.title = within
-      ? `${r.totalMs.toFixed(1)} ms of the 200 ms budget to find the passages — ${(200 / Math.max(r.totalMs, 0.01)).toFixed(0)}x headroom. Click for the stage breakdown.`
-      : `${r.totalMs.toFixed(1)} ms — over the 200 ms retrieval budget.`;
+      ? `${r.totalMs.toFixed(1)} ms of the 200 ms budget to find the passages - ${(200 / Math.max(r.totalMs, 0.01)).toFixed(0)}x headroom. Click for the stage breakdown.`
+      : `${r.totalMs.toFixed(1)} ms - over the 200 ms retrieval budget.`;
     meta.append(speed);
 
     const stagesPanel = this.stagesPanel(r, opts);
@@ -349,7 +343,7 @@ export class Chat {
     });
 
     if (!answered && INPUT_GATE_REFUSALS.has(r.refusal ?? "")) {
-      meta.append(el("div", "stopped at the input gate — no embedding spent", "meta-note"));
+      meta.append(el("div", "stopped at the input gate - no embedding spent", "meta-note"));
     }
 
     body.append(stagesPanel);
@@ -411,7 +405,7 @@ export class Chat {
     if (opts.userChunks) parts.push(`${opts.userChunks.toLocaleString()} of your chunks scanned`);
     if (opts.truncated) parts.push("user-source scan hit its cap");
     if (r.plan.degraded && r.plan.reason) parts.push(r.plan.reason);
-    parts.push("retrieval only — writing the answer, and speech, are off this clock");
+    parts.push("retrieval only - writing the answer, and speech, are off this clock");
     const note = document.createElement("p");
     note.className = "meter-plan";
     note.textContent = parts.join(" · ");
@@ -472,7 +466,7 @@ function sourceLabel(s: { kind: "corpus" | "user"; title?: string }): string {
 /**
  * The document names behind an answer, de-duplicated in rank order.
  *
- * Named rather than counted — "from biodata.pdf" is actionable where "from 3
+ * Named rather than counted - "from biodata.pdf" is actionable where "from 3
  * sources" is not. Past two documents it becomes a count anyway, since a line of
  * six filenames stops being a sentence.
  */

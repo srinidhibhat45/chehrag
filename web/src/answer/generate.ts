@@ -1,32 +1,23 @@
 /**
- * Answer generation — the "G" in RAG.
+ * The G in RAG. Retrieval finds the passage; this turns it into an answer.
  *
- * Retrieval finds the passage that contains the answer; this turns it into one.
- * Without it the app shows the source line verbatim, which is a search result
- * rather than an answer.
+ * A model round trip is hundreds of milliseconds, so generation sits outside
+ * the 200 ms budget and the two are timed separately in the UI. Retrieval is
+ * the guarantee and is what the chip under each answer reports.
  *
- * Generation cannot sit inside the 200 ms budget — a model round trip is
- * hundreds of milliseconds — so the two are timed and labelled separately:
- * `6.8 ms retrieval · 740 ms answer`. Retrieval remains the guarantee, runs
- * entirely in the browser, and is what the chip under each answer reports.
- *
- * The response streams, which is why this is not a plain JSON POST: the first
- * words land as the model produces them rather than after the whole answer
- * exists.
+ * Streamed rather than a plain JSON POST so the first words land as the model
+ * produces them.
  *
  * Trust boundary: passage text comes from user documents and a shipped corpus
- * and is put in front of a language model. It is fenced as data in the prompt,
- * the model is told it is data, and the finished answer is checked back against
- * its passages (gate 3) before it is allowed to stand.
+ * and goes in front of a language model. It is fenced as data, the model is
+ * told it is data, and the answer is checked back against its passages
+ * (gate 3) before it stands.
  *
- * The loop, and why it is here rather than in the Worker: the model answers by
- * calling a tool, and one of its tools is another search. The index lives in
- * this browser, so the search has to run here — the Worker holds the API key
- * and nothing else. So the Worker stays stateless and streams the tool call
- * back; this file executes it against the same sub-5 ms retrieval engine that
- * produced the first excerpts, appends the result to a transcript, and posts
- * again. At most one round, bounded by the Worker withholding the tool the
- * second time rather than by a counter here.
+ * The tool loop runs here rather than in the Worker because the index is here.
+ * The Worker holds the API key and nothing else, so it streams the tool call
+ * back, this file runs the search against the same engine that produced the
+ * first excerpts, and posts the transcript again. One extra round at most, and
+ * the bound is the Worker withholding the tool rather than a counter.
  */
 
 /** One retrieved passage, with the document it came from. */
@@ -75,7 +66,7 @@ export type GenOutcome =
    *
    * `sources` is what the answer was actually written from, which after a
    * `search_corpus` call is not what was passed in. `cited` is the subset the
-   * model says it used — gate 3 checks against those, so an answer citing an
+   * model says it used - gate 3 checks against those, so an answer citing an
    * excerpt that does not exist fails grounding rather than passing on the
    * strength of passages it never read.
    */
@@ -119,7 +110,7 @@ export const DEFAULT_GEN_CONFIG: GenConfig = {
 /**
  * Ask the generator for an answer, streaming it back through `handlers`.
  *
- * Never throws. Every failure — no key, worker down, malformed stream, timeout —
+ * Never throws. Every failure - no key, worker down, malformed stream, timeout -
  * returns `unavailable`, because the caller always holds a grounded extractive
  * answer to fall back on.
  */
@@ -167,8 +158,8 @@ export async function generate(
       const added = working.length - from;
       handlers.onToolNote?.(
         added
-          ? `searched again for "${String(turn.args.query ?? "").slice(0, 60)}" — ${added} more excerpt${added === 1 ? "" : "s"}`
-          : `searched again for "${String(turn.args.query ?? "").slice(0, 60)}" — nothing new`);
+          ? `searched again for "${String(turn.args.query ?? "").slice(0, 60)}" - ${added} more excerpt${added === 1 ? "" : "s"}`
+          : `searched again for "${String(turn.args.query ?? "").slice(0, 60)}" - nothing new`);
       transcript.push({ role: "assistant_tool", id: turn.id, name: turn.name, args: turn.rawArgs });
       transcript.push({
         role: "tool_result", id: turn.id, name: turn.name,
@@ -183,7 +174,7 @@ export async function generate(
       return { kind: "answer", text: turn.text, ms: performance.now() - started,
                sources: working, cited: turn.cited, toolCalls };
     }
-    return turn;                     // insufficient | unavailable — both terminal
+    return turn;                     // insufficient | unavailable - both terminal
   }
 
   // Fell out of the loop: the model asked for a tool on its last allowed round.
@@ -207,7 +198,7 @@ async function requestTurn(
   const abort = new AbortController();
 
   // Two timers, because they fail for different reasons. Silence at the start
-  // means the request never began — cold worker, bad key, network black hole —
+  // means the request never began - cold worker, bad key, network black hole -
   // and there is nothing to wait for. Silence afterwards means the model is
   // mid-sentence, and cutting it off discards an answer already arriving.
   let sawToken = false;

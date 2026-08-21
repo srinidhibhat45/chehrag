@@ -1,28 +1,22 @@
 /**
- * BM25 over the shipped corpus — the one index that does not embed anything.
+ * BM25 over the shipped corpus. The one index that embeds nothing.
  *
- * The six dense indices differ in *what* they embed. This one differs in the
- * matching rule: exact terms, weighted by how rare they are and how long the
- * passage is. It exists because a 384-dimension vector averaged over a passage
- * cannot hold an exact token — a year, an acronym, a surname — and a quarter of
- * this corpus's queries are numeric. See `pipeline/src/lexical.py` for the build
- * side and the argument in full.
+ * The dense indices differ in what they embed; this one differs in how it
+ * decides a match. A 384-dim vector averaged over a passage cannot hold an
+ * exact token (a year, an acronym, a surname) and 25% of this corpus's queries
+ * are numeric. Build side: `pipeline/src/lexical.py`.
  *
- * Shape of the shipped index, and why:
- *
- *   hashHi/hashLo   the term dictionary, as sorted 64-bit FNV-1a hashes rather
- *                   than strings. Binary-searched in place: no JSON parse at
- *                   boot, no string comparison per lookup.
+ * Shipped layout:
+ *   hashHi/hashLo   term dictionary as sorted 64-bit FNV-1a hashes, not
+ *                   strings. Binary-searched in place, so no JSON parse at boot.
  *   offsets         prefix offsets into the postings, so df is a subtraction.
  *   docs/tf         postings, ascending by passage within each term.
  *   norm            k1 * (1 - b + b * len/avgLen), precomputed per passage.
- *                   It is the whole of the inner loop's arithmetic that does
- *                   not depend on the query, so it is not paid per query.
+ *                   Everything in the inner loop that does not depend on the
+ *                   query, so it is not paid per query.
  *
- * P100 discipline, same as `ivf.ts`: every buffer is allocated at construction,
- * the accumulator is cleared by walking the touched list rather than the whole
- * corpus, and the candidate set is capped so a query of very common terms cannot
- * cost more than a query of rare ones.
+ * Same P100 rules as ivf.ts: buffers allocated once, the accumulator cleared by
+ * walking the touched list rather than the corpus, postings capped.
  */
 
 import type { StrategySearchResult } from "./ivf";
@@ -33,7 +27,7 @@ export interface LexicalIndexData {
   offsets: Uint32Array;   // terms + 1
   docs: Uint32Array;      // postings
   tf: Uint8Array;         // postings
-  lengths: Uint16Array;   // numPassages — content tokens per passage
+  lengths: Uint16Array;   // numPassages - content tokens per passage
   numPassages: number;
   avgLen: number;
   k1: number;
@@ -41,18 +35,15 @@ export interface LexicalIndexData {
 }
 
 /**
- * 64-bit FNV-1a, in 32-bit halves.
+ * 64-bit FNV-1a in 32-bit halves. Port of `lexical.py::fnv1a64`.
  *
- * A port of `lexical.py::fnv1a64`, and the one place where the browser and the
- * builder must agree bit for bit: a mismatch is not a crash but a silent miss —
- * every lookup fails and the index returns nothing at all, which is
- * indistinguishable from a query with no rare terms. `bench/lexparity.ts`
- * asserts the two agree over real corpus vocabulary.
+ * The one place the browser and the builder must agree bit for bit. A mismatch
+ * is not a crash, it is a silent miss: every lookup fails and the index returns
+ * nothing, which looks exactly like a query with no rare terms.
+ * `bench/lexparity.ts` checks the two against real corpus vocabulary.
  *
- * BigInt would express this in three lines. It is avoided because this runs per
- * query term inside the measured budget, and because the arithmetic below is
- * exact: the 16-bit partial products are all under 2^32, so every intermediate
- * is an integer a double represents exactly.
+ * BigInt would be three lines but runs per query term inside the budget. The
+ * arithmetic here is exact anyway: every intermediate is under 2^53.
  */
 const ENC = new TextEncoder();
 
@@ -62,18 +53,15 @@ export function fnv1a64(s: string): { hi: number; lo: number } {
   const bytes = ENC.encode(s);
   for (let i = 0; i < bytes.length; i++) {
     lo = (lo ^ bytes[i]) >>> 0;
-    // Multiply by the FNV prime 0x100000001B3. Split across 32-bit halves that
-    // is primeHi = 0x100 and primeLo = 0x1B3 — the prime is 2^40 + 0x1B3, so
-    // its high word is 256 and not 1, which is the easiest thing in this
-    // function to get wrong and costs only the high half of every hash.
-    // Modulo 2^64:
+    // Multiply by the FNV prime 0x100000001B3, mod 2^64. In 32-bit halves the
+    // prime is primeHi = 0x100, primeLo = 0x1B3: it is 2^40 + 0x1B3, so the
+    // high word is 256, not 1. Getting that wrong corrupts only the high half
+    // of every hash, which is invisible until nothing matches.
     //
     //   lo'  = (lo * primeLo) mod 2^32
-    //   hi'  = (carry out of the above) + hi * primeLo + lo * primeHi
+    //   hi'  = carry + hi * primeLo + lo * primeHi
     //
-    // `lo * 0x1B3` is under 2^41 and `lo * 0x100` under 2^40, so both are
-    // exact doubles — no 16-bit splitting, which is the other easy thing to
-    // get wrong here.
+    // lo * 0x1B3 < 2^41 and lo * 0x100 < 2^40, both exact as doubles.
     const full = lo * 0x1b3;
     const nlo = full >>> 0;
     hi = (Math.floor(full / 4294967296) + Math.imul(hi, 0x1b3) + lo * 0x100) >>> 0;
@@ -101,10 +89,9 @@ export class LexicalIndex {
    * Ceiling on postings visited per query.
    *
    * Without it, cost is set by the commonest term the user happens to say. The
-   * df ceiling in the builder already removes the worst offenders; this bounds
-   * what is left, including the case of a query with many moderately common
-   * terms. Terms are visited rarest-first, so what a truncation drops is always
-   * the least informative part of the query.
+   * builder's df ceiling removes the worst offenders; this bounds what is left,
+   * including a query of many moderately common terms. Terms are visited
+   * rarest first, so a truncation drops the least informative part.
    */
   readonly maxPostings: number;
 
@@ -147,9 +134,8 @@ export class LexicalIndex {
   /**
    * Score the corpus against a query's content tokens.
    *
-   * @param tokens de-duplicated content tokens, from `contentTokens`. The same
-   *               function the builder used, which is what makes a lookup able
-   *               to hit at all.
+   * @param tokens de-duplicated content tokens from `contentTokens` - the same
+   *               function the builder used, which is what lets a lookup hit
    * @param k      passages to return
    */
   search(tokens: Iterable<string>, k: number): StrategySearchResult {
@@ -170,9 +156,9 @@ export class LexicalIndex {
       if (slot < 0) continue;
       const df = offsets[slot + 1] - offsets[slot];
       if (df === 0) continue;
-      // Robertson-Sparck-Jones IDF with the +1 that keeps it positive: without
-      // it a term in over half the corpus scores negative and *penalises* the
-      // passages containing it.
+      // Robertson-Sparck-Jones IDF, with the +1 that keeps it positive. Without
+      // it a term in over half the corpus scores negative and penalises the
+      // passages that contain it.
       idfs.push(Math.log(1 + (numPassages - df + 0.5) / (df + 0.5)));
       slots.push(slot);
     }
@@ -230,15 +216,12 @@ export class LexicalIndex {
     // thousand would cost more than the search.
     for (let i = 0; i < nTouched; i++) scores[touched[i]] = 0;
 
-    // Rescaled to [0,1] against this query's own best hit.
-    //
-    // BM25 is unbounded and lives on a completely different scale from cosine.
-    // Fusion reads rank, not score, so ranking is unaffected either way — but
-    // `FusedHit.bestRawScore` takes a max across strategies, and an unbounded
-    // number there would dominate a field of cosines. In normal operation the
-    // rescore stage overwrites that field with a real int8 cosine before gate 2
-    // reads it; this keeps the value sane in the degraded path where rescoring
-    // was skipped, rather than relying on that one guarantee alone.
+    // Rescaled to [0,1] against this query's own best hit. BM25 is unbounded
+    // and on a different scale from cosine. Fusion reads rank so ranking is
+    // unaffected, but `FusedHit.bestRawScore` takes a max across strategies and
+    // an unbounded number would dominate a field of cosines. Rescoring
+    // normally overwrites that field before gate 2 reads it; this keeps it sane
+    // on the degraded path where rescoring was skipped.
     const top = n ? outScores[0] : 0;
     if (top > 0) for (let i = 0; i < n; i++) outScores[i] /= top;
 

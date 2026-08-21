@@ -1,24 +1,17 @@
 /**
- * Spoken answers, routed across two providers because for this corpus they are
- * not interchangeable:
+ * Spoken answers, across two providers because neither covers the corpus alone.
  *
- *   ElevenLabs `eleven_flash_v2_5` — ~75 ms model latency across 32 languages,
- *   but of the fourteen in MSMARCO-XI it covers only Hindi and Tamil.
+ *   ElevenLabs eleven_flash_v2_5   ~75 ms, 32 languages, but only Hindi and
+ *                                  Tamil of the fourteen in MSMARCO-XI
+ *   Sarvam bulbul:v2               Bengali, Gujarati, Kannada, Malayalam,
+ *                                  Marathi, Odia, Punjabi, Telugu
  *
- *   Sarvam `bulbul:v2` — native Indic, covering Bengali, Gujarati, Kannada,
- *   Malayalam, Marathi, Odia, Punjabi and Telugu, exactly the set ElevenLabs
- *   leaves out.
+ * A language goes to ElevenLabs when ElevenLabs speaks it and to Sarvam
+ * otherwise. The browser's own speechSynthesis sits under both as a labelled
+ * fallback so the app is demonstrable with no keys set.
  *
- * So a language goes to ElevenLabs when ElevenLabs speaks it and to Sarvam
- * otherwise, which is the only arrangement under which every language in the
- * corpus can be spoken at all.
- *
- * The browser's `speechSynthesis` sits under both as a last resort, labelled as
- * a fallback wherever it is used, so the interface stays demonstrable with no
- * keys configured.
- *
- * None of this is inside the 200 ms budget or measured against it: speech
- * happens after an answer already exists on screen.
+ * None of this is in the 200 ms budget: speech happens after the answer is
+ * already on screen.
  */
 
 export type TtsProvider = "elevenlabs" | "sarvam" | "browser" | "none";
@@ -74,7 +67,7 @@ export class Speaker {
         elevenlabs: !!h.tts?.elevenlabs,
         sarvam: !!h.tts?.sarvam,
       };
-    } catch { /* worker down — browser voice only */ }
+    } catch { /* worker down - browser voice only */ }
     return this.available;
   }
 
@@ -118,7 +111,7 @@ export class Speaker {
       } catch (err) {
         if ((err as Error).name === "AbortError") throw err;
         this.opts.onNotice?.(
-          `${route} voice unavailable (${(err as Error).message}) — using the browser voice`,
+          `${route} voice unavailable (${(err as Error).message}) - using the browser voice`,
         );
       }
     }
@@ -134,8 +127,8 @@ export class Speaker {
    * Fetch synthesised audio through the Worker and play it.
    *
    * A whole-blob fetch rather than MediaSource streaming. A spoken answer is one
-   * or two sentences, under four seconds of audio, and at that length MSE —
-   * codec strings, buffer appends, the per-browser quirks matrix — buys a couple
+   * or two sentences, under four seconds of audio, and at that length MSE -
+   * codec strings, buffer appends, the per-browser quirks matrix - buys a couple
    * of hundred milliseconds for a class of failure that is silent and hard to
    * reproduce. The Worker still streams from the provider; only this hop is
    * buffered.

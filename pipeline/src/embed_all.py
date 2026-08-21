@@ -74,7 +74,7 @@ def main() -> None:
             continue
         if vec_path.exists() and meta_path.exists():
             n = np.load(vec_path, mmap_mode="r").shape[0]
-            print(f"[{strat}] already done ({n:,} vectors) — skipping")
+            print(f"[{strat}] already done ({n:,} vectors) - skipping")
             grand_n += n
             continue
 

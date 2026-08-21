@@ -1,6 +1,6 @@
-# CONTEXT — Chehrag (HH Goa 2026, Task 2)
+# CONTEXT - Chehrag (HH Goa 2026, Task 2)
 
-Working memory for this build. Update as decisions land. Not for the team — see `APPROACH.md` for that.
+Working memory for this build. Update as decisions land. Not for the team - see `APPROACH.md` for that.
 
 ---
 
@@ -8,12 +8,12 @@ Working memory for this build. Update as decisions land. Not for the team — se
 
 | # | Requirement | Where it's satisfied |
 |---|---|---|
-| 1 | Speech-to-text via Sarvam **or** ElevenLabs | Sarvam STT (streaming) + ElevenLabs/Sarvam TTS, all proxied through CF Worker |
-| 2 | Chunking strategy must be "vast" — not naive fixed-size | 5 strategies + RRF fusion across 5 indices |
+| 1 | Speech-to-text via Sarvam **or** ElevenLabs | Sarvam STT (streaming) + Sarvam TTS, proxied through the CF Worker; ElevenLabs TTS path wired, unkeyed |
+| 2 | Chunking strategy must be "vast" - not naive fixed-size | 5 strategies + RRF fusion across 5 indices |
 | 3 | Full pipeline < 200ms | Runs in-browser; zero network in measured path |
 | 4 | Report P50 / P70 / P100 over many queries | `bench/` harness, per-stage breakdown |
-| 5 | Proper harness — orchestration, retries, structured I/O, error recovery | `web/src/harness/` typed stage pipeline |
-| 6 | Guardrails — off-topic, unsafe, hallucination, ungrounded | `web/src/guardrails/`, 3 gates |
+| 5 | Proper harness - orchestration, retries, structured I/O, error recovery | `web/src/harness/` typed stage pipeline |
+| 6 | Guardrails - off-topic, unsafe, hallucination, ungrounded | `web/src/guardrails/`, 3 gates |
 
 ## Locked architecture
 
@@ -22,7 +22,7 @@ Working memory for this build. Update as decisions land. Not for the team — se
 ```
 mic → Sarvam STT (streaming, partials)
         ↓ transcript
-    [BROWSER — the measured 200ms path]
+    [BROWSER - the measured 200ms path]
       embed query (ONNX, local)
       → search 5 indices (int8, in-memory)
       → RRF fusion
@@ -32,18 +32,18 @@ mic → Sarvam STT (streaming, partials)
     LLM synthesis via CF Worker → streamed in after
 ```
 
-**Why browser-first:** eliminates the network round trip entirely — not measured around it, genuinely absent. Also means static hosting: free, global CDN, never sleeps, no cold starts. A judge's laptop is faster than any free cloud box.
+**Why browser-first:** eliminates the network round trip entirely - not measured around it, genuinely absent. Also means static hosting: free, global CDN, never sleeps, no cold starts. A judge's laptop is faster than any free cloud box.
 
 ### Hosting (chosen for £0 + never-sleeps)
-- **Cloudflare Pages** — static app + index shards. Free, unlimited bandwidth, global CDN.
-- **Cloudflare Worker** — only for (a) hiding the Sarvam API key, (b) optional LLM synthesis. Free tier 100k req/day.
+- **Cloudflare Pages** - static app + index shards. Free, unlimited bandwidth, global CDN.
+- **Cloudflare Worker** - only for (a) hiding the Sarvam API key, (b) optional LLM synthesis. Free tier 100k req/day.
 - No always-on server. Nothing to keep alive. Nothing to cold-start.
 
 ### Rejected alternatives (don't revisit)
-- **HF Spaces** — Docker/Gradio Spaces now require paid PRO (checked 2026-08). Only static is free.
-- **Oracle Always Free** — halved to 2 OCPU/12GB in June 2026, capacity lottery.
-- **Render/Railway/Fly free** — 512MB–1GB RAM (index won't fit) and they sleep. Sleep = 30s first request = P100 destroyed.
-- **Sharding one query across clouds** — tail amplification: waiting on the slowest of N makes P100 strictly worse. Never do this.
+- **HF Spaces** - Docker/Gradio Spaces now require paid PRO (checked 2026-08). Only static is free.
+- **Oracle Always Free** - halved to 2 OCPU/12GB in June 2026, capacity lottery.
+- **Render/Railway/Fly free** - 512MB–1GB RAM (index won't fit) and they sleep. Sleep = 30s first request = P100 destroyed.
+- **Sharding one query across clouds** - tail amplification: waiting on the slowest of N makes P100 strictly worse. Never do this.
 
 ## Machine (build box)
 
@@ -53,7 +53,7 @@ M3 Pro · 11 cores (5P/6E) · **18 GB RAM** · 188 GB free · Node v26.2.0 · Py
 
 ## Dataset
 
-`ai4bharat/MSMARCO-XI` — **11.45M rows, 55.6 GB, 14 Indic languages.**
+`ai4bharat/MSMARCO-XI` - **11.45M rows, 55.6 GB, 14 Indic languages.**
 HF dataset viewer is crashing (`JobManagerCrashedError`) → stream parquet, infer schema ourselves.
 
 Fields: `query`, `Answer`, `passages{is_selected, English_passages, Translated_passages}`, `Eng_Query`, `Eng_Answer`, `query_id`, `query_type`, `source_lang`, `target_lang`.
@@ -89,42 +89,46 @@ Everything in the fast path must be warmed at load and allocation-free per query
 - [x] Machine + tooling surveyed
 - [x] Architecture locked
 - [x] uv / Python 3.12 env
-- [x] Dataset acquisition + subset — 10k queries, 98,867 passages
-- [x] Chunking strategies — 6 strategies, 809,607 chunks
-- [x] BM25 lexical index — 7th index, 99,703 terms / 2,995,581 postings
+- [x] Dataset acquisition + subset - 10k queries, 98,867 passages
+- [x] Chunking strategies - 6 strategies, 809,607 chunks
+- [x] BM25 lexical index - 7th index, 99,703 terms / 2,995,581 postings
 - [x] Embedder verified (drift + throughput measured)
-- [x] Embedding run — 809,607 vectors in 58.2 min
+- [x] Embedding run - 809,607 vectors in 58.2 min
 - [x] PCA 384->**256** (192 rejected: only 0.80 variance), quantization, IVF build
 - [x] Browser index format + loader (sharded passages)
-- [x] Harness — stage budgets, retries, degradation, circuit breaker
-- [x] Guardrails — 90/90 gate cases pass; gate 2 calibrated on holdout;
+- [x] Harness - stage budgets, retries, degradation, circuit breaker
+- [x] Guardrails - 90/90 gate cases pass; gate 2 calibrated on holdout;
       gate 3a refuses fabricated citations
-- [x] Bench — **P50 18.8 / P100 27.5 ms in-browser interactive, 100% under 200ms**
-- [x] Tool-call loop — model calls typed tools; `search_corpus` executes in-browser
-- [x] End-to-end voice measured — STT P50 275.8 ms, retrieval P100 21.5 ms
-- [x] STT client (Sarvam streaming + batch fallback) — written, needs live key to verify
+- [x] Bench - **P50 21.5 / P70 22.9 / P100 27.6 ms in-browser, 36/36 under 200ms**;
+      Node harness P50 2.6 / P70 2.9 / P100 15.0-17.5 over n=500 x 3 runs
+- [x] Tool-call loop - model calls typed tools; `search_corpus` executes in-browser
+- [x] End-to-end voice measured - STT P50 451 ms, retrieval P50 8.9 / P100 23.2 ms,
+      STT is 97.8% of the wall clock
+- [x] STT client (Sarvam streaming + batch fallback) - written, needs live key to verify
 - [x] Running locally, verified in browser (dev and production build)
-- [x] User sources — paste / file / URL, chunked+embedded client-side, fused with the corpus
-- [x] **App starts empty** — the shipped corpus is opt-in, so an answer's origin is
-      unambiguous. Gate 1 refuses "nothing loaded" in 0.1ms as its own reason
-- [x] **English on user sources** — the MS MARCO-fitted absolute threshold refused
+- [x] User sources - paste / file / URL, chunked+embedded client-side, fused with the corpus
+- [x] Corpus is **on by default** and named on every answer; the rail can switch it
+      off. Gate 1 refuses "nothing loaded" in 0.1ms as its own reason, distinct
+      from LOW_CONFIDENCE
+- [x] **English on user sources** - the MS MARCO-fitted absolute threshold refused
       25% of answerable English questions; a measured mid-band lexical rescue
       (user sources only) takes coverage 75% -> 96.4% with no new false answers,
       and leaves the corpus's calibrated numbers identical to the query
-- [x] Deadline planner + `bench/deadline.ts` — cap holds to an **8ms** budget, 0 overruns
-- [x] Hosting config — `_headers`, cache busting, SSRF guards, deploy scripts
-- [x] Fireball — WebGL2 shader in a worker; 0 main-thread frames, measured
-- [x] Layout — three panes (sources / conversation / studio); latency is a chip per answer
-- [x] TTS — ElevenLabs `eleven_flash_v2_5` + Sarvam `bulbul:v2`, routed by language
-- [x] Multilingual stress test — 15 languages x 200 queries; found 5 bugs
-- [x] **Deployed — https://chehrag.pages.dev** (Worker: `chehrag-worker.chehrag-worker.workers.dev`)
+- [x] Deadline planner + `bench/deadline.ts` - cap holds to an **8ms** budget, 0 overruns
+- [x] Hosting config - `_headers`, cache busting, SSRF guards, deploy scripts
+- [x] Fireball - WebGL2 shader in a worker; 0 main-thread frames, measured
+- [x] Layout - three panes (sources / conversation / studio); latency is a chip per answer
+- [x] TTS - Sarvam `bulbul:v2` live; ElevenLabs `eleven_flash_v2_5` path wired and
+      switches on when `ELEVENLABS_API_KEY` is set (not set on the deployment)
+- [x] Multilingual stress test - 15 languages x 200 queries (n=3,000); found 5 bugs
+- [x] **Deployed - https://chehrag.pages.dev** (Worker: `chehrag-worker.chehrag-worker.workers.dev`)
 
 ## Measured facts (don't re-derive)
 
 **Corpus (Hindi validation split)**
 - Source file 97,941 rows -> sampled 10,000 queries -> 98,867 unique passages
 - 6,988 answerable / 3,012 unanswerable. The unanswerable slice IS the abstention test set.
-- Passage length: mean 317 / median 295 chars. **Already chunk-sized** — this is why
+- Passage length: mean 317 / median 295 chars. **Already chunk-sized** - this is why
   naive fixed-size chunking is inert here, and it drove the whole strategy design.
 - query_type mix: DESCRIPTION 54%, NUMERIC 25%, ENTITY 9%, PERSON 6%, LOCATION 6%
 - Telugu has NO train file (13 train vs 14 validation files). Not a bug in our code.
@@ -140,7 +144,7 @@ Everything in the fast path must be warmed at load and allocation-free per query
 | document | 33,248 | 0.34 |
 | **TOTAL** | **809,607** | **8.19** |
 
-**Embedder — `Xenova/multilingual-e5-small`, 384-dim**
+**Embedder - `Xenova/multilingual-e5-small`, 384-dim**
 - Same ONNX weights in Python build and browser query. Non-negotiable: mismatched
   weights degrade retrieval silently.
 - Quantized-vs-fp32 drift: cosine **0.996** mean, **100% top-10 rank agreement**.
@@ -157,18 +161,18 @@ Everything in the fast path must be warmed at load and allocation-free per query
 
 ## Open questions
 
-- Corpus size target — tuning against browser download budget. Starting hypothesis: ~250k passages ≈ 100–150 MB int8.
+- Corpus size target - tuning against browser download budget. Starting hypothesis: ~250k passages ≈ 100–150 MB int8.
 - Cross-encoder rerank in-browser: may be too slow. Fallback = drop it, land ~15ms.
 
 ---
 
 ## Investigation log
 
-### Quantized-model batch dependence (resolved — no action needed)
+### Quantized-model batch dependence (resolved - no action needed)
 
 Symptom: transformers.js (browser) and Python onnxruntime produced vectors at
 cos 0.9966, despite loading a byte-identical `model_quantized.onnx`
-(sha256 `f80102d3…` verified on both sides).
+(sha256 `f80102d3...` verified on both sides).
 
 Chased it down:
 - python **batched** vs python **single** : cos 0.9966  <- the real source
@@ -179,7 +183,7 @@ Cause: **dynamic quantization computes activation scales across the whole
 tensor**, so batch composition changes rounding. Inherent to the export; not
 fixable by batching strategy.
 
-Decision — measured rather than argued. A/B on 5,950 passages / 600 gold-labelled
+Decision - measured rather than argued. A/B on 5,950 passages / 600 gold-labelled
 queries, query side always q8-single (what the browser does):
 
 | index build | build time | R@1 | R@5 | R@10 |
@@ -196,7 +200,7 @@ Multi-strategy fusion has to improve on this or it isn't earning its complexity.
 ### Tooling notes
 - npm workspaces would not hoist to root; bench lives in `web/bench/` so module
   resolution works. Don't move it back.
-- `sharp` has high-severity CVEs — transitive dep of transformers.js for IMAGE
+- `sharp` has high-severity CVEs - transitive dep of transformers.js for IMAGE
   input only. We do text only and it never reaches the browser bundle. No fix
   available upstream; accepted.
 
@@ -206,7 +210,7 @@ The Python builder writes binary data that JS reads. Every such boundary is a
 silent-failure surface: wrong layout still produces numbers, just wrong ones.
 Two tests now guard them (`web/bench/bitparity.ts`, `web/bench/pcaparity.ts`).
 
-**BUG 1 — `popcnt` integer overflow in `ivf.ts` (severity: total).**
+**BUG 1 - `popcnt` integer overflow in `ivf.ts` (severity: total).**
 Original used `(x * 0x01010101) >> 24`. In JS `*` yields a double; for large
 inputs the product exceeds 2^31 and the following `>>` does a lossy ToInt32,
 returning a wrong (often negative) popcount. Hamming distances came out with
@@ -214,10 +218,10 @@ deltas up to 2.07e9. Retrieval would have run without error and ranked by noise.
 Fix: `Math.imul(x, 0x01010101) >>> 24`, and `>>>` for the intermediate shifts.
 **Verified: 0/64 Hamming mismatches vs numpy after the fix.**
 
-**BUG 2 — Node Buffer pooling in the test harness (severity: test-only).**
+**BUG 2 - Node Buffer pooling in the test harness (severity: test-only).**
 `readFileSync(p).buffer` returns the whole POOLED ArrayBuffer, not the file's
 region. Must use `new T(b.buffer, b.byteOffset, b.byteLength / BPE)`.
-This bites the bench loaders too — they already slice correctly.
+This bites the bench loaders too - they already slice correctly.
 
 PCA projection parity: worst cosine 0.9999999, max abs 1.94e-7. Clean.
 
@@ -225,19 +229,19 @@ PCA projection parity: worst cosine 0.9999999, max abs 1.94e-7. Clean.
 Cloudflare Pages rejects any file over **25 MiB**. Hindi passage text is ~91 MB
 raw (Devanagari is 3 bytes/char in UTF-8). Passage text is therefore SHARDED into
 ~8 MB files, listed in `manifest.passageShards`, fetched in parallel at boot and
-concatenated **in order** (ordinals are positional — never sort or race them).
+concatenated **in order** (ordinals are positional - never sort or race them).
 The builder asserts each shard is under the limit.
 
 
 ---
 
-## Second pass — Chehrag (2026-08-20)
+## Second pass - Chehrag (2026-08-20)
 
 Renamed from "Voice RAG". चिराग़ = lamp; Cheh + RAG. The lamp is the interface.
 
 ### Encoder moved to a Web Worker
 
-**Why:** not raw speed — contention. Ingesting a user document is minutes of
+**Why:** not raw speed - contention. Ingesting a user document is minutes of
 embedding. A query issued during that would queue behind hundreds of batches and
 blow the budget *before its first stage started*, which no per-stage budget can
 rescue because the time is spent before the stage exists.
@@ -254,14 +258,14 @@ allocations no longer share a GC arena with the UI.
 
 **Fallback kept.** Worker construction fails under some CSPs and privacy
 extensions. `createEncoder()` falls back in-thread. That fallback's
-transformers.js import is **dynamic** — a static one pulled the whole 870 KB
+transformers.js import is **dynamic** - a static one pulled the whole 870 KB
 library into the main chunk purely to have a fallback ready, on top of the copy
 already in the worker chunk. Main bundle: 924 KB -> 57.7 KB.
 
 ### Warm-up is load-bearing, and 2 samples was not enough
 
 First query ~20ms embed vs ~6ms warm. Warm-up now runs 8 queries spanning both
-scripts and a range of lengths — tokenisation and sequence length are what the
+scripts and a range of lengths - tokenisation and sequence length are what the
 graph specialises on, so warming only on short ASCII leaves the Devanagari path
 cold. Costs ~150ms of a multi-second load. Node harness P100: 14.7 -> 7.1 ms.
 
@@ -276,7 +280,7 @@ up `nprobe` first (linear cost, sublinear recall), then `perStrategyK`, then
 the **rescored cosine**. Drop rescoring and the gate compares 0.4788 against a
 Hamming proxy on a different scale.
 
-### `bench/deadline.ts` — and the two bugs it found
+### `bench/deadline.ts` - and the two bugs it found
 
 Can't borrow a slow phone, so shrink the budget instead: 20ms here exercises the
 path a 10x slower device hits at 200ms. Nine budgets, reporting both whether the
@@ -285,27 +289,27 @@ deadline held and what recall it cost.
 **Result: 0 overruns from 200ms down to 12ms.** First breach at 10ms (2/150),
 below one embedding forward pass. ~17x slower machine still meets the brief.
 
-**BUG 3 — `rescore` reserved 12ms for a 0.03ms operation.** Under a tight budget
+**BUG 3 - `rescore` reserved 12ms for a 0.03ms operation.** Under a tight budget
 `minRemainingMs: 12` skipped it, gate 2 then thresholded the Hamming proxy with
 a cosine threshold, and the system refused nearly everything (kept@3 -> 0%).
 Fixed both halves: reservation is now 2ms, and if rescoring is ever skipped the
 gate drops the score test rather than applying a threshold fitted on a different
-quantity — and marks the answer degraded so it is never passed off as calibrated.
+quantity - and marks the answer degraded so it is never passed off as calibrated.
 
-**BUG 4 — `embed` retried with no budget left.** `retries: 1` plus a timeout
+**BUG 4 - `embed` retried with no budget left.** `retries: 1` plus a timeout
 means the second attempt spends time that was already gone, overshooting 2x at
 exactly the tightest moment. `Pipeline` now refuses to start an attempt when
 under `RETRY_MIN_REMAINING_MS`. Removed the last overruns at 12–15ms.
 
 **Bench methodology bug (mine, caught before reporting):** first version used
-`DEFAULT_THRESHOLDS` (0.80 / 2 agreement — the conservative placeholder for
+`DEFAULT_THRESHOLDS` (0.80 / 2 agreement - the conservative placeholder for
 "calibration never run") instead of the fitted `thresholds.json`. The corpus
 refused nearly everything, so kept@3 was computed over **n=4** and looked like a
 measurement. Always load what ships.
 
 ### User sources
 
-`src/sources/` — ingest -> passages -> 6 strategies -> embed -> quantise -> flat index.
+`src/sources/` - ingest -> passages -> 6 strategies -> embed -> quantise -> flat index.
 
 - **Flat, not IVF.** Thousands of chunks, not 810k. Clustering would mean k-means
   in the browser on every add: seconds of work to save microseconds of query,
@@ -319,13 +323,13 @@ measurement. Always load what ships.
 - **Quantisation must be byte-identical to `build_index.py`** (`sources/quantise.ts`).
   Both corpora fuse in one RRF pass under one calibrated threshold; different
   quantisation on either side means the guardrail reads two incompatible scales.
-- **Persistence stores the quantised form**, not floats — 32x smaller for codes,
+- **Persistence stores the quantised form**, not floats - 32x smaller for codes,
   4x for passage vectors, and exactly what search needs, so reload replays
   straight in. Stamped with model + dim + codeWords; mismatches are discarded
   rather than replayed, because vectors from a different model are not comparable.
-- **BUG 5 — `extractJson` dropped keys for non-string scalars.** `battery_hours: 400`
-  was indexed as a bare `400`. Bare numbers are unfindable — no question embeds
-  near them — so exactly the facts people ask about were the ones that couldn't be
+- **BUG 5 - `extractJson` dropped keys for non-string scalars.** `battery_hours: 400`
+  was indexed as a bare `400`. Bare numbers are unfindable - no question embeds
+  near them - so exactly the facts people ask about were the ones that couldn't be
   retrieved. Confirmed by probe: the query refused at conf 0.412, and 0.667 after
   the fix. Keys now carried for every scalar, nested paths dotted.
 
@@ -334,7 +338,7 @@ measurement. Always load what ships.
 - **COOP/COEP are load-bearing, not hygiene.** Cross-origin isolation is what
   lets ORT use SharedArrayBuffer; without it transformers.js silently drops to
   single-threaded and the dominant budget cost triples with nothing in the
-  console. `credentialless`, not `require-corp` — HF CDN and Google Fonts set no
+  console. `credentialless`, not `require-corp` - HF CDN and Google Fonts set no
   CORP. Mirrored into `vite preview` so the built output tests representatively.
 - **Cache busting.** Index paths aren't content-hashed, so the loader appends
   `?v=<manifest.builtAt>` and fetches the manifest `no-cache`. That is what makes
@@ -345,7 +349,7 @@ measurement. Always load what ships.
   re-checked** (a public host may redirect to 169.254.169.254); size and time
   capped. The Worker holds two API keys.
 - **Compression measured, not assumed:** passages JSON brotli **5.74x** (74 -> 13 MB);
-  binary blobs 1.00–1.18x. Quantised data is near-random and does not compress —
+  binary blobs 1.00–1.18x. Quantised data is near-random and does not compress -
   so precompressing the blobs would have been wasted build time.
 
 ### Loader memory
@@ -353,7 +357,7 @@ measurement. Always load what ships.
 Switched passage shards back to `r.json()` from `r.text()` + `JSON.parse`. The
 text form holds a 74 MB string alongside the parsed array at peak; on a 4 GB
 phone that headroom isn't free. Cost: exact transferred size is no longer
-observable, so progress is charged per shard against the estimate — which is all
+observable, so progress is charged per shard against the estimate - which is all
 a progress bar needs.
 
 ### UI constraint worth keeping
@@ -362,18 +366,18 @@ The lamp animates **only** `transform`, `opacity` and registered custom
 properties, all compositor-side. In this project a main-thread idle animation
 would be a correctness bug: its frames would land inside the budget it exists to
 advertise. Mic amplitude is the one JS-driven part, and it runs only while
-recording — never during a measured query.
+recording - never during a measured query.
 
 
 ---
 
-## Third pass — multilingual + the fire (2026-08-20)
+## Third pass - multilingual + the fire (2026-08-20)
 
 ### The orb is now a real shader, in its own worker
 
 The old orb was a radial-gradient with a CSS blur behind it and read as exactly
-that: a flat disc in fog. Fire is legible because of *structure* — turbulent
-filaments that curl and burn out — and a gradient has no structure at any scale,
+that: a flat disc in fog. Fire is legible because of *structure* - turbulent
+filaments that curl and burn out - and a gradient has no structure at any scale,
 so no amount of tuning was going to get there.
 
 `src/ui/fire.ts` is a WebGL2 fragment shader. Three things carry it:
@@ -385,7 +389,7 @@ move together the way they do in a flame.
 **It renders in a worker over an `OffscreenCanvas`.** This is the same
 constraint as before, satisfied properly rather than by restricting what CSS is
 allowed to animate. `requestAnimationFrame` *is* available in a dedicated worker
-wherever `OffscreenCanvas` is, so the loop stays vsync-locked — this is not a
+wherever `OffscreenCanvas` is, so the loop stays vsync-locked - this is not a
 `setTimeout` approximation. Verified: **0 main-thread rAF callbacks over 2s**
 while the fire renders continuously.
 
@@ -395,7 +399,7 @@ static CSS ember. `prefers-reduced-motion` goes straight to the ember.
 
 **Shader bugs worth remembering:**
 - The turbulence term has a positive mean, so ungated it lifted every pixel on
-  the canvas slightly above zero. Invisible on its own — but the alpha feather
+  the canvas slightly above zero. Invisible on its own - but the alpha feather
   cut it off at a fixed radius, and the cut read as a **hard circular outline**
   drawn around the fireball. Fixed by gating turbulence with a radial `env`, so
   the fire is genuinely absent where there is no fire rather than
@@ -411,7 +415,7 @@ static CSS ember. `prefers-reduced-motion` goes straight to the ember.
 
 Sources | conversation | studio, after Gemini/NotebookLM. Sources are a
 permanent rail rather than a modal drawer, because in a notebook the sources are
-the subject, not a setting — you want to switch one off and re-ask without
+the subject, not a setting - you want to switch one off and re-ask without
 losing your place.
 
 Answers are a **thread**, not a result panel that overwrites itself. The
@@ -424,24 +428,24 @@ stage breakdown in place. It was a whole tab, which has the pathology of any
 metrics tab: the number lives somewhere you have to go and look, at which point
 it is no longer attached to the thing it is a fact about.
 
-### Speech out — and why BOTH providers
+### Speech out - and why BOTH providers
 
 The brief says Sarvam *or* ElevenLabs. Using one would mean losing something:
 
-- ElevenLabs `eleven_flash_v2_5`: ~75ms model latency, 32 languages — but of the
+- ElevenLabs `eleven_flash_v2_5`: ~75ms model latency, 32 languages - but of the
   fourteen in MSMARCO-XI it has only Hindi and Tamil.
 - Sarvam `bulbul:v2`: native Indic, covers Bengali, Gujarati, Kannada,
-  Malayalam, Marathi, Odia, Punjabi, Telugu — exactly the set ElevenLabs lacks.
+  Malayalam, Marathi, Odia, Punjabi, Telugu - exactly the set ElevenLabs lacks.
 
 So `src/tts/speak.ts` routes by language. Not hedging: it is the only
 arrangement under which every language the corpus contains can be spoken.
 
 The browser's `speechSynthesis` sits under both as a labelled fallback, so the
 app is demonstrable with no keys. It is never counted as satisfying requirement
-1, and `/health` — not the presence of a Worker URL — decides what the note
+1, and `/health` - not the presence of a Worker URL - decides what the note
 under the voice pickers claims.
 
-### Multilingual stress test — `bench/multilingual.ts`
+### Multilingual stress test - `bench/multilingual.ts`
 
 MSMARCO-XI is the same MS MARCO queries in 14 languages keyed by `query_id`, so
 joining on that key gives **real parallel text**. Machine-translating our own
@@ -450,20 +454,20 @@ apart from retrieval error.
 
 `pipeline/src/parallel_queries.py` reads only `query_id`, `query`, `Eng_Query`.
 Parquet is columnar, so those three columns over HTTP range requests skip the
-`passages` column that is ~95% of each 460MB file — 14 languages for a few MB.
+`passages` column that is ~95% of each 460MB file - 14 languages for a few MB.
 All 6,988 answerable query ids joined in all 14 languages.
 
 **Scored twice, deliberately.** hit@k answers "did retrieval rank the gold
 passage" (read from `RagAnswer.retrieved`, which is now populated even on a
 refusal); answered@ answers "did the guardrails allow it". A language can score
-well on the first and badly on the second — the threshold was fitted on Hindi —
+well on the first and badly on the second - the threshold was fitted on Hindi -
 and one number would hide that in the flattering direction.
 
 Results: pooled P50 3.95 / P100 24.72ms, 0% over budget across 3,000 queries.
 hit@5 from 58.5% (Hindi, the ceiling) through English 54.5% down to Assamese
 25.5%. Degrades smoothly; nothing falls over.
 
-### BUG 6 — nine languages refused before they were read (severity: total)
+### BUG 6 - nine languages refused before they were read (severity: total)
 
 Gate 1 tested for letters with `[a-zA-Z ऀ-ॿ]`. In a system advertising fourteen
 Indian languages, **nine of them contained "no words"** and were rejected as
@@ -471,10 +475,10 @@ GIBBERISH in 0.1ms, before any vector existed.
 
 It survived because a fast confident refusal is indistinguishable from a working
 guardrail. Nothing errored; the numbers looked *good*, because refusals are
-cheap. Now `\p{L}` — the general fix, so the next script added does not need
-this line edited — plus one real query per language in `bench/gatetest.ts`.
+cheap. Now `\p{L}` - the general fix, so the next script added does not need
+this line edited - plus one real query per language in `bench/gatetest.ts`.
 
-### BUG 7 — the not-a-question rule refused ordinary questions
+### BUG 7 - the not-a-question rule refused ordinary questions
 
 The rule was "more than 8 words and no interrogative marker". That cannot
 distinguish a command from an **information-seeking imperative**, which is one
@@ -483,7 +487,7 @@ of the commonest query shapes:
     "Explain what a bone scan is and what it is used for."  ->  NOT_A_QUESTION
 
 Measured: 98 refusals across 3,000 parallel queries, and those 98 retrieved gold
-at hit@5 **35.7%** — the average for this corpus. It was refusing perfectly good
+at hit@5 **35.7%** - the average for this corpus. It was refusing perfectly good
 questions and the interrogative lists it consulted only covered two scripts.
 
 Replaced with a **positive** test for verbs that ask the system to act
@@ -491,7 +495,7 @@ Replaced with a **positive** test for verbs that ask the system to act
 delete a file" stays a question. Interrogative markers now exist for all ten
 scripts, used to *exempt* rather than to condemn. Hindi answered 79% -> 90%.
 
-### BUG 8 — the 200ms guarantee had an unbounded-input hole (severity: high)
+### BUG 8 - the 200ms guarantee had an unbounded-input hole (severity: high)
 
 Embedding is the only stage whose cost is set by the **input** rather than by the
 corpus, and nothing bounded it:
@@ -504,14 +508,14 @@ The deadline planner cannot save this. It degrades *retrieval*, worth about a
 millisecond, and by the time it runs the embedding is already paid for. A bound
 has to be applied **before** the cost is incurred, not after.
 
-`MAX_QUERY_CHARS = 320`, set by measurement and not by e5's 512-*token* limit —
+`MAX_QUERY_CHARS = 320`, set by measurement and not by e5's 512-*token* limit -
 characters and tokens are not the same across scripts, and 512 characters of
 Assamese sat right on the embed stage's budget. p99 of a real query is 71
 characters. Truncates rather than refuses (this is a voice interface) and
 reports it in the plan, because a silently shortened question is a wrong answer
 waiting to happen.
 
-### BUG 9 — a timeout was retried, turning slow into failed
+### BUG 9 - a timeout was retried, turning slow into failed
 
 `retries: 1` on embed applied to **timeouts** as well as faults. A stage that
 timed out was handed deterministic work that did not fit; running it again
@@ -527,16 +531,16 @@ one. Retries are for transient faults; a deadline miss is not a fault.
 It previously breached at 10ms (2/150). The floor moved because the retries were
 what was breaching it.
 
-### BUG 10 — the benchmark UI was most of what it measured
+### BUG 10 - the benchmark UI was most of what it measured
 
 The in-app multilingual sweep painted a progress line and then immediately
 started a query. `totalMs` is wall-clock on the main thread across an `await` on
-the encoder worker, and it cannot tell a repaint from retrieval — so the paint
+the encoder worker, and it cannot tell a repaint from retrieval - so the paint
 landed inside the first query and was charged to it. **Reported P100 122ms
 against a true 13ms.**
 
 Fixed by waiting for the frame to land before starting the clock. And the naive
-fix — `requestAnimationFrame(() => setTimeout(r, 0))` — **deadlocked the sweep in
+fix - `requestAnimationFrame(() => setTimeout(r, 0))` - **deadlocked the sweep in
 a background tab**, because browsers stop servicing rAF entirely while hidden.
 Now raced against a 250ms timeout: when nothing is being painted there is no
 paint to wait for, which makes falling through correct rather than a compromise.
@@ -548,19 +552,19 @@ paint to wait for, which makes falling through correct rather than a compromise.
 - Embed cost by clamped length, worst script, Node / in-browser (~4x, WASM):
   256 -> 7.6 / ~30ms · 320 -> 9.3 / ~37ms · 512 -> 15.3 / ~60ms.
 - Cross-origin isolation confirmed live in `vite preview`
-  (`crossOriginIsolated === true`, SAB present) — so the browser/Node gap is
+  (`crossOriginIsolated === true`, SAB present) - so the browser/Node gap is
   WASM overhead, not a silently single-threaded ORT.
 
 ---
 
-## Fourth pass — the first-run curtain (2026-08-20)
+## Fourth pass - the first-run curtain (2026-08-20)
 
 ### The first visit was 35 seconds of a dead interface
 
 Measured on a genuinely cold cache (IndexedDB and cache storage cleared,
 production build): **34.9 s to ready.** For all of it the visitor saw a lamp
 with `disabled` on it, a "Type instead" button that opened a text field which
-refused keystrokes, and an "Add" button wired to nothing — `SourcesPanel` is
+refused keystrokes, and an "Add" button wired to nothing - `SourcesPanel` is
 not constructed until the encoder and the store exist. The only account of any
 of it was eleven pixels of grey byte counter under the lamp.
 
@@ -580,8 +584,8 @@ survives, which is the right thing to lose first.
 ### The model was a 135 MB download that reported nothing
 
 Found by watching the first version: the bar froze at 88% for the entire
-encoder load, because only the index had progress and the model — the other
-half of the parallel pair — had none. That reproduced the exact confusion the
+encoder load, because only the index had progress and the model - the other
+half of the parallel pair - had none. That reproduced the exact confusion the
 curtain exists to remove, one step further in.
 
 transformers.js takes a `progress_callback`; it was simply never passed. Now
@@ -605,16 +609,16 @@ Consequences worth keeping:
 
 ### Two failure paths, because they fail differently
 
-- `boot()` rejecting is reported *on the curtain*, not only on the orb — the
+- `boot()` rejecting is reported *on the curtain*, not only on the orb - the
   orb is behind it, and an error the user cannot see is the same as no error.
 - The module never running at all (chunk 404, CSP, parse error) cannot be
   reported by `curtain.ts`, which is the thing that did not load. A classic
   inline `<script>` in `index.html` handles that one, keyed on a `data-wired`
-  flag the Curtain constructor sets — not on a timer against the download,
+  flag the Curtain constructor sets - not on a timer against the download,
   because a cold first visit is legitimately long and must not trip it.
 
 Plus a stall detector: 30 s with no byte and no phase change says the wait has
-become abnormal and offers Reload. It does not claim failure — the fetch may
+become abnormal and offers Reload. It does not claim failure - the fetch may
 still be alive.
 
 Cost: +3.0 kB JS, +3.1 kB CSS, +4.2 kB HTML.
@@ -629,19 +633,19 @@ and a real cross-lingual generation over the wire.
 
 | | p50 | p70 | p95 | P100 | over 200 ms |
 |---|---|---|---|---|---|
-| localhost | 9.42 | — | — | 21.58 | 0 / 500 |
+| localhost | 9.42 | - | - | 21.58 | 0 / 500 |
 | chehrag.pages.dev | 9.39 | 10.05 | 12.38 | 25.77 | 0 / 500 |
 
 `crossOriginIsolated === true` live, so the threaded WASM path is real and the
 numbers above are not single-threaded ones.
 
-Cold first visit on the live origin: **32.4 s** — index and the 135 MB model in
+Cold first visit on the live origin: **32.4 s** - index and the 135 MB model in
 parallel, both now reported by the curtain.
 
 **Benchmark methodology note, same family as BUG 10.** The first two live runs
 read p50 50 / P100 137 and looked like the deployment was 5x slower than local.
 It was not: both were taken immediately after the tab was activated, and the
-activation's repaint and worker resume landed inside the measured span —
+activation's repaint and worker resume landed inside the measured span -
 `totalMs` is wall-clock across an `await` on the encoder worker and cannot tell
 them apart. A control run on localhost under identical conditions is what
 separated "the deployment is slow" from "the measurement is". **Never read a
@@ -654,25 +658,25 @@ than a missing capability.
 
 ---
 
-## Addendum — the four gaps, and what closing them taught us
+## Addendum - the four gaps, and what closing them taught us
 
 Written after a pass re-reading the brief against the code rather than against
 the README. Four things were weaker than the documentation implied.
 
 **1. The chunking docstring promised a BM25 axis that did not exist.** Four axes
 were named; three were built. Building the fourth took four seconds of compute
-and produced the single most useful measurement in the project: over 1,412
-answerable queries, *no dense strategy is worth more than 0.4 points of hit@5*,
-and the lexical index is worth 2.3. Six chunkers that differ in where they cut
+and produced the single most useful measurement in the project: over 1,385
+answerable queries, *no dense strategy is worth more than 0.7 points of hit@5*,
+and the lexical index is worth 1.4. Six chunkers that differ in where they cut
 find largely the same passages. One index that differs in *how it decides a
 match* does not.
 
-We had reasoned our way to this in the strategies docstring — "the axes that
-actually pay on this corpus" — and then built five things on axes (a)-(c) and
+We had reasoned our way to this in the strategies docstring - "the axes that
+actually pay on this corpus" - and then built five things on axes (a)-(c) and
 none on (d). The corpus statistics were right and we under-followed them.
 
 **2. The harness had no tool calls.** It had budgets, retries, degradation and a
-circuit breaker — three of the four things requirement 5 lists — and the model
+circuit breaker - three of the four things requirement 5 lists - and the model
 call at the end was a string in, a string out, with a sentinel for refusal. It
 is now a typed tool contract, and the tool the model can call runs *in the
 browser*, because that is where the index is. The Worker stays stateless and
@@ -690,7 +694,7 @@ is 95% of the wall clock. The argument was correct, and stating it as a
 measurement is worth more than stating it well.
 
 **4. Retries were thinner than "retries" implied.** One stage declared them.
-Every network call — the ones that actually fail — had timeouts and no retry.
+Every network call - the ones that actually fail - had timeouts and no retry.
 Now both sides of the network retry 429/5xx and transport faults with jittered
 backoff, and never a 4xx.
 
@@ -700,7 +704,7 @@ backoff, and never a 4xx.
 so splitting it across 32-bit halves gives `primeHi = 0x100`. We wrote 1. Every
 hash was correct in its low word and wrong in its high word, which means every
 dictionary lookup would have missed, which means the lexical index would have
-returned nothing at all — indistinguishable from BM25 simply not helping, the
+returned nothing at all - indistinguishable from BM25 simply not helping, the
 exact question the ablation was built to answer. The parity test caught it on
 its first run. It is the third silent cross-language bug this project has found
 with the same technique, after bit packing and PCA layout.
@@ -708,8 +712,115 @@ with the same technique, after bit packing and PCA layout.
 **A planner that does not know about a stage overruns by exactly that stage's
 cost.** `budgetPlan` models `nprobe`, `perStrategyK` and `rescoreTopN`. The
 lexical scan is bounded by a postings cap instead, so it is a fixed cost the
-ladder cannot reduce — and it was not in the model. The budget bench caught it
+ladder cannot reduce - and it was not in the model. The budget bench caught it
 immediately: the cap that had held to an 8 ms budget now broke at 10 ms. Adding
 one constant restored it. The lesson is not the constant; it is that the
 degradation ladder is only as honest as its cost model, and adding work to the
 hot path means adding it to the planner in the same commit.
+
+
+---
+
+## Fifth pass - the retrieval rewrite (2026-08-21)
+
+Profiled before touching anything. Of a 2.09 ms `retrieve` stage, two phases held
+90%:
+
+    candidate partial selection sort   1.09 ms   (52%)
+    centroid ranking                   0.81 ms   (38%)
+    hamming scan                       0.15 ms
+    nprobe selection sort              0.06 ms
+
+Both were the wrong algorithm rather than slow code.
+
+**Counting sort for candidates.** Hamming distance is an integer in [0, 256], so
+ordering the head of the candidate list is O(n) with a 258-bucket count. The
+partial selection sort it replaced was O(need x n) = 96 x 3072 comparisons per
+index per query, six times over. It also cost more than the Hamming scan that
+produced the candidates, which is the tell.
+
+**PCA prefix for cluster ranking.** Ranking 4,179 centroids at 256 dims is 1.07M
+multiply-adds per query. PCA orders components by variance, so a 96-dim prefix
+pass shortlists 3x nprobe clusters and only the shortlist is scored on the full
+vector. Measured against full-dim ranking: same cluster set 99.7%, same nearest
+cluster 100%, 57% of the cost. Tried and rejected: int8 centroids (0.67 ms
+against 0.59 for fp32 - the scale multiply eats the gain).
+
+Plus four accumulators in the dot products, a single-pass bounded insertion for
+top-nprobe, and an unrolled 8-word Hamming with inlined popcount.
+
+Result: dense search 1.97 -> 0.82 ms, whole retrieve stage 2.07 -> 0.80 ms,
+hit@1 and hit@3 unchanged (top-1 identical on 100% of queries; the 0.6% of
+result lists that differ are tie-order at the tail).
+
+### Then spent the headroom on recall
+
+With retrieval 3x cheaper there was budget to buy back. Swept nprobe and the
+candidate cap against quality on 415 answerable queries, graded pre-guardrail:
+
+| | hit@1 | hit@3 | hit@5 | hit@10 | MRR@10 | p50 |
+|---|---|---|---|---|---|---|
+| nprobe 12 / cap 3072 | 31.6% | 52.0% | 61.9% | 67.2% | 0.4352 | 2.34 |
+| nprobe 24 / cap 3072 | 32.0% | 52.8% | 62.4% | 68.4% | 0.4409 | 2.40 |
+| **nprobe 24 / cap 6144** | **32.3%** | **53.3%** | **64.1%** | **69.4%** | **0.4463** | 2.41 |
+| nprobe 40 / cap 9216 | 32.3% | 53.5% | 64.1% | 70.4% | 0.4467 | 2.80 |
+
+nprobe saturates at 24 and the cap at 6144. **+2.2 hit@5 for 0.07 ms**, a bigger
+retrieval gain than the whole lexical index. Gate 2 was refitted afterwards
+(0.4938 -> 0.4995) because changing retrieval changes the score distribution.
+
+`maxCandidates` is now a `RagConfig` knob and a field on `RetrievalPlan`, and the
+planner's cost constants were re-derived from measurement (0.30 ms fixed +
+0.013 ms/nprobe, x3 for the browser) - the old ones were 4x too high after the
+rewrite, which made the ladder degrade far earlier than it needed to. Deadline
+bench after: 0 overruns to 8 ms, and kept@3 at a 12 ms budget went 77.8% ->
+89.9%.
+
+### The single biggest win was one line
+
+The browser was 56 ms per query against 2.6 ms in Node - 20x, where WASM against
+native should be 3-5x. onnxruntime-web runs the graph on **one** WASM thread
+unless told a number, and setting the COOP/COEP headers does not change that on
+its own. Measured in-browser, embedding only:
+
+    1 thread   51.0 ms
+    4 threads  16.3 ms
+    8 threads  15.2 ms
+
+Four is where the curve flattens. Browser P50 56 -> 21.5 ms. Everything else in
+this pass is worth about 2 ms in the browser; this was worth 35.
+
+### Two other things this pass fixed
+
+**Concurrent `ask()` was a real race.** Speculative retrieval fires on partial
+transcripts without awaiting, and the final transcript starts a second `ask()`
+while the first is still in its embed await. They share `queryVec` and every
+index's scratch buffers, so one query could embed into another's vector. Masked
+in practice because the two are prefixes of the same utterance. The engine now
+serialises: one query at a time, queued on a promise chain.
+
+**Fusion was the biggest allocator in the pipeline** - a Map, a Set per strategy
+and an object per candidate, ~200 objects per query. Confirmed that minor GC is
+what sets P100 by raising the young generation: same run, P100 12.3 -> 6.8 ms
+with P50 unmoved. `Fuser` now pools its hits and uses an epoch-stamped open
+hash, and `perStrategyRank` became a bitmask expanded only for the citations
+actually shown.
+
+### The production build is not slower; the laptop was busy
+
+Worth recording because it nearly went into the README as a regression. The
+production preview measured p50 52.7 ms against dev's 21.5, and the obvious
+reading was that something in the build had broken threading. It had not:
+`/health` and the encoder log both showed 4 threads and `crossOriginIsolated:
+true` in each.
+
+The tell was that `retrieve` slowed by the same factor as `embed` - 4.9 -> 14.4
+ms against 16.3 -> 38.2. Those two share nothing: one is a WASM forward pass,
+the other is plain JS over typed arrays. Two unrelated workloads slowing by the
+same multiple is a machine, not a code path. Re-running the dev build under the
+same conditions reproduced it exactly (p50 53.1), and the Node harness went
+2.6 -> 4.5 ms on the same command.
+
+Cause: Teams at 64% CPU and Figma at 63%, load average ~4. Both numbers are now
+in the README as a pair, because the busy one is the honest figure for anyone
+running this on their own machine, and it is still half the budget.

@@ -2,13 +2,13 @@
  * Cross-language bit-packing check.
  *
  * The binary codes are written by numpy and read by JS. If the two disagree on
- * bit order, retrieval does not error — it just returns nonsense. This asserts
+ * bit order, retrieval does not error - it just returns nonsense. This asserts
  * they agree, on the actual packing code both sides use.
  */
 import { readFileSync } from "node:fs";
 
 const D = 192, WORDS = D / 32, N = 64;
-// Node Buffers are views into a POOLED ArrayBuffer with a non-zero byteOffset.
+// Node Buffers are views into a pooled ArrayBuffer with a non-zero byteOffset.
 // `.buffer` alone hands you the whole pool, not this file's bytes.
 function readTyped<T>(path: string, Ctor: new (b: ArrayBuffer, o: number, n: number) => T, bpe: number): T {
   const b = readFileSync(path);
@@ -26,7 +26,7 @@ function popcnt(x: number): number {
   return Math.imul(x, 0x01010101) >>> 24;
 }
 
-// Re-encode the query in JS using the SAME logic as IvfIndex.encodeQuery.
+// Re-encode the query in JS using the same logic as IvfIndex.encodeQuery.
 const jsQ = new Uint32Array(WORDS);
 for (let w = 0; w < WORDS; w++) {
   let acc = 0;
@@ -49,6 +49,6 @@ for (let i = 0; i < N; i++) {
 console.log(`query encode words mismatched : ${encMismatch}/${WORDS}`);
 console.log(`hamming distances mismatched  : ${hamMismatch}/${N} (max delta ${maxDelta})`);
 console.log(encMismatch === 0 && hamMismatch === 0
-  ? "PASS — numpy and JS agree on bit packing and Hamming distance"
-  : "FAIL — packing convention differs; retrieval would return nonsense");
+  ? "PASS - numpy and JS agree on bit packing and Hamming distance"
+  : "FAIL - packing convention differs; retrieval would return nonsense");
 if (encMismatch || hamMismatch) process.exit(1);
