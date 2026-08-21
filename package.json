@@ -26,6 +26,11 @@
     "keys": "./scripts/setup-keys.sh",
     "keys:check": "./scripts/check-keys.sh",
     "precompute": "npm --prefix web run precompute",
-    "bench:precomputed": "npm --prefix web run bench:precomputed"
+    "bench:precomputed": "npm --prefix web run bench:precomputed",
+    "bench:ablation": "npm --prefix web run bench:ablation",
+    "bench:tools": "npm --prefix web run bench:tools",
+    "bench:voice": "npm --prefix web run bench:voice",
+    "bench:lexparity": "npm --prefix web run bench:lexparity",
+    "build-lexical": "cd pipeline && ./.venv/bin/python src/lexical.py"
   }
 }

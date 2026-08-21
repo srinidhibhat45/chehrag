@@ -1,14 +1,14 @@
 {
-  "minTopScore": 0.4788,
+  "minTopScore": 0.4938,
   "minAgreement": 1,
   "minLexicalOverlap": 0,
-  "fittedOn": 800,
+  "fittedOn": 600,
   "holdout": {
-    "n": 800,
-    "precision": 0.4795,
-    "recall": 0.3267,
-    "f1": 0.3886,
-    "coverage": 0.8379
+    "n": 600,
+    "precision": 0.4754,
+    "recall": 0.3085,
+    "f1": 0.3742,
+    "coverage": 0.8447
   },
-  "fittedAt": "2026-08-19T16:54:17.978Z"
+  "fittedAt": "2026-08-20T18:57:28.046Z"
 }

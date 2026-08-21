@@ -41,6 +41,7 @@ const REFUSAL_HINT: Record<string, string> = {
   LOW_CONFIDENCE:"nothing in the sources matched well enough",
   NO_AGREEMENT:  "the chunking strategies disagreed",
   UNGROUNDED:    "couldn't ground an answer in the retrieved text",
+  FABRICATED_CITATION: "the answer cited a source that wasn't there",
   NO_SOURCES:    "nothing added yet",
 };
 
@@ -66,6 +67,14 @@ export interface BotHandle {
   fallBackToExtract(note: string): void;
   /** Show which voice spoke, or why none did. */
   setVoice(label: string): void;
+  /**
+   * The model used a tool mid-answer.
+   *
+   * Surfaced rather than hidden: a second search means the answer was written
+   * from passages the figure under it did not retrieve, and a reader comparing
+   * the answer to the cited passage deserves to know one arrived later.
+   */
+  setToolNote(note: string): void;
   /** Whatever text is currently being presented as the answer. */
   currentAnswer(): string;
   readonly el: HTMLElement;
@@ -226,6 +235,16 @@ export class Chat {
           body.querySelector(".msg-meta")?.append(note);
         }
         note.textContent = label;
+      },
+
+      setToolNote: (note) => {
+        let line = body.querySelector<HTMLElement>(".tool-note");
+        if (!line) {
+          line = div("tool-note");
+          body.querySelector(".msg-meta")?.before(line);
+        }
+        line.textContent = note;
+        this.scroll();
       },
     };
   }

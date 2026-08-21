@@ -48,5 +48,14 @@
     "passages.007.json",
     "passages.008.json",
     "passages.009.json"
-  ]
+  ],
+  "lexical": {
+    "terms": 99703,
+    "postings": 2995581,
+    "avgLen": 40.02273761720291,
+    "k1": 1.2,
+    "b": 0.75,
+    "dfCeiling": 14830,
+    "version": "2026-08-21T03:29:20Z"
+  }
 }

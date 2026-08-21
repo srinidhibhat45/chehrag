@@ -17,7 +17,7 @@
  * Free tier: 100k requests/day. Deploy with `wrangler deploy`.
  */
 
-import { synthesizeStream, resolveProvider, SSE_HEADERS } from "./synthesize";
+import { synthesizeStream, resolveProvider, SSE_HEADERS, type Turn } from "./synthesize";
 
 export interface Env {
   /* Index signature so `Env` satisfies `EnvLike` in synthesize.ts, which reads
@@ -189,6 +189,49 @@ async function handleSttStream(req: Request, env: Env): Promise<Response> {
  * speculative retrieval, but corporate proxies and some mobile networks break
  * long-lived WebSockets.
  */
+/**
+ * One outbound call, retried when retrying can plausibly help.
+ *
+ * Which is a narrow set. A 429 or a 5xx is the provider having a moment; a
+ * transport error is the network having one. A 4xx is this Worker having sent
+ * something wrong, and sending it again produces the same 4xx while spending
+ * the rate limit twice — so those return immediately.
+ *
+ * Backoff is exponential and jittered. Without the jitter, every request that
+ * hit one blip retries in the same millisecond and turns a provider's recovery
+ * into a second outage.
+ *
+ * Bounded deliberately low. These calls sit between a person and an answer:
+ * two attempts absorbs a blip, five would make a dead upstream indistinguishable
+ * from a slow one for fifteen seconds.
+ *
+ * The body is passed as a factory rather than a value because a `FormData` or a
+ * stream can only be consumed once, and the second attempt needs its own.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: () => RequestInit,
+  attempts = 2,
+): Promise<Response> {
+  let last: Response | null = null;
+  for (let i = 0; i < attempts; i++) {
+    if (i) {
+      const wait = 250 * 2 ** (i - 1) * (0.5 + Math.random());
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    try {
+      const res = await fetch(url, init());
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      last = res;
+      // Drain, or the connection is held until it times out.
+      await res.text().catch(() => "");
+    } catch {
+      last = null;                    // transport failure — worth another go
+    }
+  }
+  return last ?? new Response(null, { status: 502 });
+}
+
 async function handleSttBatch(req: Request, env: Env, origin: string | null): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405, headers: corsHeaders(env, origin) });
@@ -210,17 +253,23 @@ async function handleSttBatch(req: Request, env: Env, origin: string | null): Pr
       { status: 413, headers: corsHeaders(env, origin) });
   }
 
-  const form = new FormData();
-  form.append("file", file, "audio.webm");
-  form.append("model", (inBody.get("model") as string) || "saaras:v3");
-  const lang = inBody.get("language_code") as string | null;
-  if (lang) form.append("language_code", lang);
+  // Rebuilt per attempt: a FormData that has been sent once cannot be sent
+  // again, and reusing it makes the retry fail in a way that looks like the
+  // upstream rejecting the audio.
+  const buildForm = (): FormData => {
+    const form = new FormData();
+    form.append("file", file, "audio.webm");
+    form.append("model", (inBody.get("model") as string) || "saaras:v3");
+    const lang = inBody.get("language_code") as string | null;
+    if (lang) form.append("language_code", lang);
+    return form;
+  };
 
-  const res = await fetch(SARVAM_REST, {
+  const res = await fetchWithRetry(SARVAM_REST, () => ({
     method: "POST",
-    headers: { "api-subscription-key": env.SARVAM_API_KEY },
-    body: form,
-  });
+    headers: { "api-subscription-key": env.SARVAM_API_KEY as string },
+    body: buildForm(),
+  }));
   if (!res.ok) {
     return Response.json({ error: "stt_failed", status: res.status },
       { status: 502, headers: corsHeaders(env, origin) });
@@ -270,11 +319,11 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
     if (!env.SARVAM_API_KEY) {
       return Response.json({ error: "sarvam_tts_not_configured" }, { status: 503, headers });
     }
-    const res = await fetch(SARVAM_TTS, {
+    const res = await fetchWithRetry(SARVAM_TTS, () => ({
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "api-subscription-key": env.SARVAM_API_KEY,
+        "api-subscription-key": env.SARVAM_API_KEY as string,
       },
       body: JSON.stringify({
         text,
@@ -283,7 +332,7 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
         speaker: "anushka",
         enable_preprocessing: true,
       }),
-    });
+    }));
     if (!res.ok) {
       return Response.json({ error: "sarvam_tts_failed", status: res.status },
         { status: 502, headers });
@@ -301,11 +350,11 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
     return Response.json({ error: "elevenlabs_not_configured" }, { status: 503, headers });
   }
   const voice = env.ELEVENLABS_VOICE_ID || DEFAULT_VOICE_ID;
-  const res = await fetch(`${ELEVEN_TTS}/${voice}/stream?output_format=mp3_22050_32`, {
+  const res = await fetchWithRetry(`${ELEVEN_TTS}/${voice}/stream?output_format=mp3_22050_32`, () => ({
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "xi-api-key": env.ELEVENLABS_API_KEY,
+      "xi-api-key": env.ELEVENLABS_API_KEY as string,
       accept: "audio/mpeg",
     },
     body: JSON.stringify({
@@ -318,7 +367,7 @@ async function handleTts(req: Request, env: Env, origin: string | null): Promise
       language_code: body.language || undefined,
       voice_settings: { stability: 0.4, similarity_boost: 0.75, speed: 1.0 },
     }),
-  });
+  }));
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     return Response.json({ error: "elevenlabs_failed", status: res.status, detail: detail.slice(0, 300) },
@@ -351,7 +400,11 @@ async function handleSynthesize(req: Request, env: Env, origin: string | null): 
     return Response.json({ error: "llm_not_configured" }, { status: 503, headers: cors });
   }
 
-  let body: { query?: string; sources?: Array<{ title?: string; text?: string }> };
+  let body: {
+    query?: string;
+    sources?: Array<{ title?: string; text?: string }>;
+    transcript?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -367,9 +420,38 @@ async function handleSynthesize(req: Request, env: Env, origin: string | null): 
     return Response.json({ error: "bad_request" }, { status: 400, headers: cors });
   }
 
-  const stream = synthesizeStream(provider, query, sources);
+  // The tool transcript comes back from the browser on a continuation, so it is
+  // client-controlled input and is validated rather than trusted: the shape is
+  // checked, the fields are coerced to strings, and it is capped. It reaches a
+  // model as prior turns, so an unbounded one is an unbounded prompt.
+  const transcript = parseTranscript(body.transcript);
+
+  const stream = synthesizeStream(provider, query, sources, transcript);
 
   return new Response(stream, { headers: { ...cors, ...SSE_HEADERS } });
+}
+
+/** Longest tool exchange the Worker will replay. One search is all the model
+ *  is offered, so anything beyond this is a malformed or hostile client. */
+const MAX_TRANSCRIPT_TURNS = 6;
+const MAX_TURN_CHARS = 8000;
+
+function parseTranscript(raw: unknown): Turn[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Turn[] = [];
+  for (const item of raw.slice(0, MAX_TRANSCRIPT_TURNS)) {
+    if (!item || typeof item !== "object") continue;
+    const t = item as Record<string, unknown>;
+    const id = String(t.id ?? "").slice(0, 128);
+    const name = String(t.name ?? "").slice(0, 64);
+    if (!id || !name) continue;
+    if (t.role === "assistant_tool") {
+      out.push({ role: "assistant_tool", id, name, args: String(t.args ?? "").slice(0, MAX_TURN_CHARS) });
+    } else if (t.role === "tool_result") {
+      out.push({ role: "tool_result", id, name, content: String(t.content ?? "").slice(0, MAX_TURN_CHARS) });
+    }
+  }
+  return out;
 }
 
 /**

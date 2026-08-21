@@ -46,6 +46,16 @@ const MS_PER_NPROBE = 0.17;
 const MS_PER_1K_USER_CHUNKS = 0.014;
 /** Fusion, both gates, extraction, and the pipeline's own bookkeeping. */
 const FIXED_TAIL_MS = 1.2;
+/**
+ * The BM25 pass over the corpus.
+ *
+ * Near-constant rather than proportional to `nprobe`, because it is bounded by
+ * the postings cap in `retrieval/lexical.ts` rather than by how many clusters
+ * the dense indices visit — so it belongs in the fixed cost and not in the
+ * ladder. Charged unconditionally: it is not one of the knobs, and the ablation
+ * says it should be the last thing given up rather than the first.
+ */
+const MS_LEXICAL = 0.6;
 /** int8 rescore of one passage. */
 const MS_PER_RESCORE = 0.002;
 
@@ -74,7 +84,7 @@ export function budgetPlan(remainingMs: number, cfg: RagConfig, userChunks: numb
   };
 
   const userCost = (userChunks / 1000) * MS_PER_1K_USER_CHUNKS;
-  const budget = remainingMs - SAFETY_MS - FIXED_TAIL_MS - userCost;
+  const budget = remainingMs - SAFETY_MS - FIXED_TAIL_MS - MS_LEXICAL - userCost;
 
   const costOf = (p: RetrievalPlan) =>
     p.nprobe * MS_PER_NPROBE + p.rescoreTopN * MS_PER_RESCORE;

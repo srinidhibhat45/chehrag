@@ -378,9 +378,14 @@ async function boot(): Promise<void> {
   curtain.stepDone("warm");
 
   const chunks = Object.values(index.manifest.strategies).reduce((a, s) => a + s.count, 0);
+  // The lexical index is counted here but not in `manifest.strategies`: it
+  // indexes passages rather than chunks, so it has no chunk count to add, and
+  // saying "6 indices" while searching 7 would be wrong in the one place a
+  // visitor can check.
+  const indices = Object.keys(index.manifest.strategies).length + (index.lexical ? 1 : 0);
   $("corpus-meta").textContent =
     `${index.manifest.numPassages.toLocaleString()} passages · ${chunks.toLocaleString()} chunks · ` +
-    `${Object.keys(index.manifest.strategies).length} strategies`;
+    `${indices} indices`;
   syncSources();
   $("src-stat").textContent = `ready in ${((performance.now() - t0) / 1000).toFixed(1)}s`;
 
@@ -565,12 +570,35 @@ async function writeAnswer(
   }));
 
   let started = false;
+  // Passages already in front of the model, so a second search adds rather than
+  // repeats.
+  const shown = new Set(base.citations.map((c) => c.passageId));
+
   const outcome = await llmBreaker.call(() =>
     generate(query, sources, {
       onDelta: (t) => {
         if (!started) { started = true; handle.beginGeneration(); }
         handle.streamDelta(t);
       },
+      // The model's one tool, executed here because the index is here. It runs
+      // the same sub-5 ms retrieval path as the original question.
+      onTool: async (name, args) => {
+        if (name !== "search_corpus") return { sources: [], summary: "Unknown tool." };
+        const q = String(args.query ?? "").trim();
+        if (!q) return { sources: [], summary: "No query was given." };
+        const found = await engine.searchAgain(q, shown);
+        for (const c of found) shown.add(c.passageId);
+        return {
+          sources: found.map((c) => ({
+            title: c.source.kind === "user" ? (c.source.title ?? "your source") : "MS MARCO-XI",
+            text: c.text,
+          })),
+          summary: found.length
+            ? `Found ${found.length} further excerpt${found.length === 1 ? "" : "s"}.`
+            : "That search found nothing beyond the excerpts you already have.",
+        };
+      },
+      onToolNote: (note) => handle.setToolNote(note),
     }, { ...DEFAULT_GEN_CONFIG, base: WORKER_BASE }),
   ).catch((): { kind: "unavailable"; reason: string } => (
     // The breaker is open after repeated failures: the system is declining to
@@ -583,7 +611,12 @@ async function writeAnswer(
     // Checked after streaming rather than before: holding the whole answer back
     // to verify it costs the entire benefit of streaming, and a rare retraction
     // is cheaper than a universal delay.
-    if (engine.verifySynthesis(outcome.text, base.citations).pass) {
+    //
+    // Checked against what the model says it used, not against everything
+    // retrieved — and `verifyGenerated` fails an answer citing an excerpt that
+    // was never supplied, which is a fabricated citation however well the prose
+    // happens to match.
+    if (engine.verifyGenerated(outcome.text, outcome.sources, outcome.cited).pass) {
       handle.endGeneration(outcome.ms);
       if (speak) void speakAnswer(outcome.text, null, handle);
       return;

@@ -10,6 +10,7 @@
  */
 
 import { IvfIndex, type IvfIndexData, PassageRescorer } from "./ivf";
+import { LexicalIndex, type LexicalIndexData } from "./lexical";
 
 export interface Manifest {
   lang: string;
@@ -21,7 +22,29 @@ export interface Manifest {
   passageShards: string[];
   model: string;
   builtAt: string;
+  /**
+   * The BM25 index, absent from indexes built before it existed.
+   *
+   * Versioned separately from `builtAt` on purpose: it is built in four seconds
+   * where the IVF blobs take ninety minutes, so rebuilding it must not
+   * invalidate 131 MB of cached vectors in every browser holding them.
+   */
+  lexical?: {
+    terms: number;
+    postings: number;
+    avgLen: number;
+    k1: number;
+    b: number;
+    dfCeiling: number;
+    version: string;
+  };
 }
+
+/** Blob names for the lexical index, in load order. */
+const LEXICAL_BLOBS = [
+  "lexical.hashhi.u32.bin", "lexical.hashlo.u32.bin", "lexical.offsets.u32.bin",
+  "lexical.docs.u32.bin", "lexical.tf.u8.bin", "lexical.lengths.u16.bin",
+] as const;
 
 const DB_NAME = "voicerag-index";
 const STORE = "blobs";
@@ -76,6 +99,15 @@ export function expectedBytes(manifest: Manifest): { blobs: number; text: number
       s.count * codeWords * 4 +           // codes.u32
       s.count * 4;                        // parents.i32
   }
+  if (manifest.lexical) {
+    const lx = manifest.lexical;
+    blobs +=
+      lx.terms * 4 * 2 +                // hashHi + hashLo
+      (lx.terms + 1) * 4 +              // offsets.u32
+      lx.postings * 4 +                 // docs.u32
+      lx.postings +                     // tf.u8
+      numPassages * 2;                  // lengths.u16
+  }
   // Passage text is JSON and its size is not derivable from counts. ~790 bytes
   // per passage is what this corpus measures; it only affects the progress bar.
   return { blobs, text: numPassages * 790 };
@@ -110,6 +142,8 @@ async function fetchCached(
 export interface LoadedIndex {
   manifest: Manifest;
   indices: Map<string, IvfIndex>;
+  /** BM25 over the same passages. Null for an index built without one. */
+  lexical: LexicalIndex | null;
   rescorer: PassageRescorer;
   passages: string[];
   pcaMean: Float32Array;
@@ -171,7 +205,25 @@ export function assembleIndex(
     for (let i = 0; i < dim; i++) out[i] /= norm;
   };
 
-  return { manifest, indices, rescorer, passages, pcaMean, pcaComp, projectQuery };
+  let lexical: LexicalIndex | null = null;
+  if (manifest.lexical && buf[LEXICAL_BLOBS[0]]) {
+    const lx = manifest.lexical;
+    const data: LexicalIndexData = {
+      hashHi: new Uint32Array(buf["lexical.hashhi.u32.bin"]),
+      hashLo: new Uint32Array(buf["lexical.hashlo.u32.bin"]),
+      offsets: new Uint32Array(buf["lexical.offsets.u32.bin"]),
+      docs: new Uint32Array(buf["lexical.docs.u32.bin"]),
+      tf: new Uint8Array(buf["lexical.tf.u8.bin"]),
+      lengths: new Uint16Array(buf["lexical.lengths.u16.bin"]),
+      numPassages: manifest.numPassages,
+      avgLen: lx.avgLen,
+      k1: lx.k1,
+      b: lx.b,
+    };
+    lexical = new LexicalIndex(data);
+  }
+
+  return { manifest, indices, lexical, rescorer, passages, pcaMean, pcaComp, projectQuery };
 }
 
 /** Every binary blob the index needs, given a manifest. */
@@ -182,6 +234,7 @@ export function indexBlobNames(manifest: Manifest): string[] {
     names.push(`${s}.centroids.f32.bin`, `${s}.offsets.u32.bin`,
                `${s}.codes.u32.bin`, `${s}.parents.i32.bin`);
   }
+  if (manifest.lexical) names.push(...LEXICAL_BLOBS);
   return names;
 }
 
@@ -199,6 +252,11 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
   const names = indexBlobNames(manifest);
   const shards = manifest.passageShards ?? ["passages.json"];
 
+  // The lexical blobs carry their own version, so a lexical rebuild re-fetches
+  // 16 MB rather than the whole index.
+  const versionOf = (name: string): string =>
+    name.startsWith("lexical.") && manifest.lexical ? manifest.lexical.version : v;
+
   // Cumulative against the expected total, so progress advances at a meaningful
   // rate rather than jumping per file.
   const expect = expectedBytes(manifest);
@@ -211,7 +269,7 @@ export async function loadIndex(base: string, onProgress?: ProgressFn): Promise<
 
   const [buffers, shardArrays] = await Promise.all([
     Promise.all(names.map((n) =>
-      fetchCached(db, base, n, v, (b, _t, label) => step(b, label)))),
+      fetchCached(db, base, n, versionOf(n), (b, _t, label) => step(b, label)))),
     // Fetched in parallel, concatenated in order. Ordinals are assigned by
     // position, so the order is load-bearing — do not sort or race.
     //

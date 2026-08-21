@@ -52,6 +52,25 @@ user pays.
     6.8 ms retrieval        in this browser, hard-capped at 200 ms
     219 ms answer           a model, over the network, as long as it takes
 
+**And we measured the whole thing, including the part we do not control.**
+`web/bench/voice.ts` speaks 60 real Hindi queries through Sarvam's own
+text-to-speech, sends that audio back through Sarvam speech-to-text, and runs
+the transcript through the shipped pipeline. Mic to grounded answer, nothing
+excluded:
+
+| | P50 | P70 | P100 |
+|---|---|---|---|
+| Sarvam speech-to-text (network) | 275.8 ms | 331.0 ms | 1040.9 ms |
+| **Retrieval pipeline (ours)** | **11.3 ms** | **12.2 ms** | **21.5 ms** |
+| Total, voice in to answer out | 290.3 ms | 342.7 ms | 1051.1 ms |
+
+**Speech-to-text is 95% of the wall clock.** That is the entire argument for the
+architecture, and it is now a measurement rather than a claim: our half of the
+end-to-end path is 4% of it, and 100% of those 60 spoken questions retrieved
+inside 200 ms with an order of magnitude to spare. No arrangement of our code
+moves the other 95%, because it belongs to a vendor on the other side of a
+network — and the brief requires that vendor.
+
 An earlier version of this app had only the first number, because it had only
 the first step. Retrieval found the passage and the interface printed it. Ask a
 CV "what is my name" and it replied:
@@ -90,11 +109,11 @@ than dressed up as an answer. Set one environment variable to change that; see
 | # | Requirement | Where |
 |---|---|---|
 | 1 | STT via Sarvam or ElevenLabs | **Both, and speech in both directions.** In: **Sarvam** `saaras:v3-realtime` streaming, proxied by a Cloudflare Worker (`web/src/stt/sarvam.ts`). Out: **ElevenLabs** `eleven_flash_v2_5` where it has the language, **Sarvam** `bulbul:v2` for the eight Indic languages it does not (`web/src/tts/speak.ts`) |
-| 2 | Chunking must be "vast", not naive fixed-size | **6 strategies**, separately indexed, fused with RRF — applied to the corpus *and* to anything the user adds. `pipeline/src/chunking/strategies.py`, `web/src/sources/chunk.ts` |
-| 3 | Full pipeline under 200ms | Runs in-browser. Measured below, and **enforced** by a deadline-aware planner rather than hoped for |
-| 4 | P50 / P70 / P100 over many queries | `web/bench/run.ts`, `web/bench/deadline.ts`, `web/bench/multilingual.ts` (3,000 queries across 15 languages). The app itself reports a stopwatch per answer and a session summary; the sweeps live in the bench scripts rather than in the interface |
-| 5 | A real harness | Typed stage pipeline: budgets, retries, degradation, circuit breaker. `web/src/harness/pipeline.ts` |
-| 6 | Guardrails | Three gates, threshold **fitted on real labels**, plus a measured correction for user-added sources the fitted threshold does not cover. `web/src/guardrails/gates.ts` |
+| 2 | Chunking must be "vast", not naive fixed-size | **7 indices** — six chunking strategies plus a **BM25 lexical index** that changes the matching rule rather than the cut — separately built, fused with RRF, applied to the corpus *and* to anything the user adds. Each one's contribution is **measured by leave-one-out ablation**, not asserted. `pipeline/src/chunking/strategies.py`, `pipeline/src/lexical.py`, `web/bench/ablation.ts` |
+| 3 | Full pipeline under 200ms | Retrieval runs in-browser, **enforced** by a deadline-aware planner rather than hoped for. Now also measured **end to end from real audio** — mic to grounded answer, STT included — in `web/bench/voice.ts`. Both numbers below |
+| 4 | P50 / P70 / P100 over many queries | `web/bench/run.ts` (300), `web/bench/multilingual.ts` (3,000 across 15 languages), `web/bench/deadline.ts` (9 budgets), `web/bench/voice.ts` (60 spoken). The app reports a stopwatch per answer; the sweeps live in bench scripts rather than in the interface |
+| 5 | A real harness | Typed stage pipeline — budgets, retries, degradation, circuit breaker (`web/src/harness/pipeline.ts`) — **and a bounded tool-call loop**: the model answers by calling a typed tool, names the excerpts it used, and can request one more search that **this browser executes** against its own index (`worker/src/synthesize.ts`, `web/src/answer/generate.ts`) |
+| 6 | Guardrails | **Four** checks: input, retrieval confidence (threshold **fitted on real labels**), fabricated-citation, and grounding — plus a measured correction for user-added sources. 90 unit cases pass. `web/src/guardrails/gates.ts` |
 
 ---
 
@@ -173,28 +192,94 @@ So the axes that actually pay are different:
 | `contextual` | same size, richer | numerics + Latin-script proper nouns, which dense vectors handle worst | header tokens dilute pure-prose queries |
 | `semantic` | finer | keeps complete ideas together | **low yield here — median passage is ~3 sentences.** Included and measured rather than assumed |
 | `document` | coarser | answers spread across sibling passages | dilute vectors; contributes recall, never precision |
+| `lexical` | **same unit, different rule** | exact tokens — a year, an acronym, a surname, a drug name. **25% of this corpus's queries are numeric** | no semantic match at all; useless on paraphrase, and blind across languages |
 
-**809,607 chunks from 98,867 passages (8.19x).** Fused with Reciprocal Rank
+**809,607 chunks from 98,867 passages (8.19x)**, plus 2,995,581 BM25 postings. Fused with Reciprocal Rank
 Fusion, which uses *rank* not score — necessary because a 111-char sentence and a
 925-char document are not score-comparable, and averaging their scores would hand
 the sentence index a permanent, invisible advantage.
 
-User documents get the same six strategies, with one addition in front: MS MARCO
+User documents get the same seven indices, with one addition in front: MS MARCO
 arrives pre-cut at passage size, and a PDF does not. So user text is first cut
 into passage-sized units on paragraph → sentence → whitespace boundaries, and
-only then do the six strategies run over those units — exactly as they run over
+only then do the strategies run over those units — exactly as they run over
 MS MARCO passages. Without that step, "the same strategies" would be a claim
 about function names rather than about behaviour.
 
+Their BM25 index is built in the browser at ingest (`web/src/sources/lexical.ts`),
+because a personal document needs it *more* than the corpus does. The shipped
+corpus is encyclopedia prose, where a paraphrase usually still finds the
+passage. A CV, an invoice or a bank statement is mostly proper nouns, dates and
+amounts — and the question is usually about exactly one of them. "How old am I"
+against `name: priya rao, age: 31` is a lexical match or it is nothing.
+
+### Which of them actually earn their place
+
+Keeping the strategies in separate indices is what makes this answerable, so we
+answered it. `npm run bench:ablation` removes one index at a time and re-measures
+retrieval over **1,412 answerable queries**, graded on rank *before* the
+guardrails — otherwise removing an index could flatter itself by shifting
+queries across gate 2's threshold.
+
+| config | hit@1 | hit@3 | hit@5 | hit@10 | MRR@10 | Δ hit@5 |
+|---|---|---|---|---|---|---|
+| **ALL SEVEN** | 28.1% | 49.0% | **57.2%** | **63.1%** | 0.4008 | — |
+| – whole | 28.4% | 49.8% | 57.5% | 63.2% | 0.4035 | +0.3 |
+| – sentence | 27.4% | 48.4% | 56.8% | 62.7% | 0.3948 | −0.4 |
+| – sliding | 28.4% | 48.9% | 56.9% | 62.6% | 0.4016 | −0.3 |
+| – contextual | 27.7% | 48.3% | 56.9% | 62.0% | 0.3956 | −0.3 |
+| – semantic | 28.0% | 49.2% | 57.4% | 63.2% | 0.4008 | +0.2 |
+| – document | 28.2% | 48.8% | 56.8% | 62.6% | 0.4003 | −0.4 |
+| **– lexical** | 27.8% | 47.2% | **54.9%** | **59.4%** | 0.3887 | **−2.3** |
+| lexical alone | 26.1% | 44.8% | 52.1% | 56.8% | 0.3662 | −5.1 |
+
+**No single dense strategy is worth more than 0.4 points, and the lexical index
+is worth 2.3** — 3.7 at hit@10. That is the most useful thing this project
+measured, and it is not the answer we expected when we built six chunkers.
+
+The dense six are **mutually redundant**: they find largely the same passages by
+slightly different routes, so removing any one leaves the others to cover it.
+Changing the *matching rule* is worth more than any amount of changing where the
+cut falls — which is exactly what the corpus statistics predicted at the top of
+this section and we did not follow far enough at first.
+
+We are keeping all seven, and the reason is not sentiment. Fusion needs several
+imperfect voters that fail independently, and **cross-strategy agreement is the
+signal gate 2 reads** to decide whether a hit is real — a passage found by one
+index with no lexical support is the classic shape of a spurious dense hit. Six
+redundant voters are what make that signal mean anything. What the ablation
+changes is the *claim*: this is an ensemble whose members overlap, and the one
+orthogonal member carries the retrieval win.
+
+Cost of the seventh index, so the trade is explicit: **+16.4 MB raw / ~7.7 MB
+over the wire**, and **+0.4 ms** at P50 (4.1 → 4.5). It buys +2.1 points of
+hit@3 and moves abstention F1 from 0.364 to 0.400.
+
 ---
 
-## Guardrails: three gates, and one of them is fitted
+## Guardrails: four checks, and one of them is fitted
 
 | Gate | Question | Method |
 |---|---|---|
 | 1 — input | Should we process this at all? | unsafe content, prompt injection (EN + HI), gibberish via character entropy, non-questions — and whether there is anything loaded to search at all |
 | 2 — retrieval | Did we actually find anything? | confidence threshold + cross-strategy agreement |
-| 3 — grounding | Is every claim traceable to a source? | token-level support check against retrieved context |
+| 3a — citation | Do the sources it cites exist? | the model names its excerpts; indices outside the supplied set are refused |
+| 3b — grounding | Is every claim traceable to those sources? | token-level support check, with an exact-match rule for numbers and names |
+
+Gate 3a is new, and it exists because the model now answers by *calling a tool*
+and naming the excerpts it used — which makes the claim checkable instead of
+inferred. An answer citing excerpt 7 of 5 has stopped reading and started
+composing, and its prose can still overlap the real passages well enough to pass
+a coverage test. It is refused as `FABRICATED_CITATION`, distinct from
+`UNGROUNDED`: one asserts something the sources do not support, the other is
+wrong about *where it came from*.
+
+It also makes 3b strictly harder. Grounding is now measured against **the
+excerpts the model claims to have used**, not against everything retrieved — so
+an answer written from excerpt 1 while citing excerpt 3 used to pass on the
+union and now does not. Where a provider ignores the field entirely, it degrades
+to checking against all supplied excerpts and records that it did, rather than
+silently weakening.
 
 Gate 1 refuses a question asked with nothing loaded in 0.1 ms, before any vector
 is computed, and says *that* rather than "I couldn't find anything good enough".
@@ -298,22 +383,33 @@ at nine budgets and reports both whether the deadline held *and* what recall it
 cost — a cap met by returning nothing useful is not a cap worth having.
 
 ```
- budget      p50     p100   over  degraded   kept@3     n
-   200ms    3.99     7.60      0        0%   100.0%   122
-   100ms    3.91     8.09      0        0%   100.0%   122
-    50ms    3.88     7.44      0        0%   100.0%   122
-    30ms    3.80    10.59      0        0%   100.0%   122
-    20ms    3.82     9.88      0        0%   100.0%   122
-    15ms    3.85     7.46      0        0%   100.0%   122
-    12ms    3.03     8.24      0       95%    93.4%   122
-    10ms    2.63    11.86      2       95%    69.7%   122   <- first breach
+ budget      p50     p100   over  degraded   kept@3     n  worst plan
+  200ms     4.14     6.61      0        0%   100.0%   167  nprobe 12, k 24, rescore 16
+  100ms     4.12     7.02      0        0%   100.0%   167  nprobe 12, k 24, rescore 16
+   50ms     4.19     9.74      0        0%   100.0%   167  nprobe 12, k 24, rescore 16
+   30ms     4.14     8.67      0        0%   100.0%   167  nprobe 12, k 24, rescore 16
+   20ms     4.12     9.63      0        0%   100.0%   167  nprobe 12, k 24, rescore 16
+   15ms     4.22     9.05      0       13%    98.8%   167  nprobe 1, k 6, rescore 4
+   12ms     2.96     6.61      0      100%    77.8%   167  nprobe 1, k 6, rescore 6
+   10ms     2.82    16.00      2      100%    67.7%   167  nprobe 1, k 6, rescore 4   <- marginal
 ```
 
 **Zero overruns from 200ms down to a 12ms budget** — the system tolerates a
-machine roughly 17x slower than this one and still meets the requirement. Below
-~10ms the budget is smaller than a single embedding forward pass, which no
-retrieval plan can recover; that is the floor of the technique, and it is
-reported rather than trimmed off the bottom of the table.
+machine roughly 17x slower than this one and still meets the requirement. At
+10ms and below it is marginal and run-dependent: one run breached twice at 10ms
+and held at 8ms, another held at 10ms. We report the level that holds
+*reliably*, not the best run we saw. Below ~10ms the budget is smaller than a
+single embedding forward pass, which no retrieval plan can recover; that is the
+floor of the technique, and it is reported rather than trimmed off the bottom of
+the table.
+
+**Adding BM25 initially cost two milliseconds of that headroom**, because
+`budgetPlan` was costing work it no longer knew the shape of: the lexical scan
+is bounded by a postings cap rather than by `nprobe`, so it is a fixed cost the
+ladder cannot reduce. Teaching the planner about it restored the floor. A
+planner that does not know about a stage is a planner that will overrun by
+exactly that stage's cost — which is the kind of thing this bench exists to
+catch, and did.
 
 **This benchmark earned its keep.** It found two real bugs that the
 fast-machine numbers could never have surfaced, because on a fast machine
@@ -331,21 +427,126 @@ neither code path ever executes:
 
 ---
 
+## The harness: typed stages, and a tool loop
+
+Requirement 5 asks for "structured orchestration around the model — tool calls,
+retries, structured input/output handling, error recovery — rather than a single
+raw prompt-in, text-out call." There are two halves to that here, and they run
+in different places for a reason.
+
+### The fast half: typed stages under a deadline
+
+Every unit of retrieval work is a declared `Stage` with a typed input and
+output, a latency budget, a retry policy, a declared failure behaviour, and
+telemetry either way (`web/src/harness/pipeline.ts`). `FAIL` aborts the run;
+`DEGRADE` falls back and carries on. Optional stages are **skipped rather than
+started** when too little budget remains, because a stage abandoned halfway has
+spent the budget the required stages needed.
+
+Two rules in there were written by measurement rather than by taste:
+
+- **A timeout is never retried.** Retries exist for transient faults. A stage
+  that timed out was handed deterministic work that did not fit, and running it
+  again produces the identical overrun at double the price — which is how a
+  merely-slow query became a 122.9 ms *failure*.
+- **A retry never starts if it cannot finish.** Late in the budget, the first
+  attempt has already spent most of what was left; a second spends it again,
+  overshooting exactly when the budget is tightest.
+
+### The slow half: the model calls tools, and the browser runs them
+
+The model does not return prose. It returns a **tool call**, against a typed
+schema (`worker/src/synthesize.ts`):
+
+| Tool | Purpose |
+|---|---|
+| `answer` | the final answer **plus `excerpt_indices`** — which excerpts it used |
+| `insufficient_context` | the excerpts do not answer the question |
+| `search_corpus` | search again with different words. **At most once** |
+
+`search_corpus` is the interesting one, because of *where it executes*. The
+index is in the browser and the Worker holds nothing but an API key — so the
+Worker streams the tool call back, and **the page runs it against the same
+sub-5 ms retrieval engine that produced the first excerpts**, appends what it
+finds, and posts the transcript back (`web/src/answer/generate.ts`). The tool
+runs where the data is. No passage is shipped to the Worker to make it possible,
+and the Worker stays stateless — which is what lets a retry land on a different
+edge instance.
+
+It exists because the first retrieval used the words the *user* said. A model
+that has read the excerpts and can see they are about the wrong sense of a word
+knows something the retriever did not, and one more 4 ms search is far cheaper
+than a wrong answer.
+
+**The loop is bounded structurally, not by a counter.** Once the transcript
+shows a search has run, the Worker simply does not offer the tool again, so the
+model cannot spend a round trip asking for something that would be refused.
+The browser independently stops after two rounds. Neither end depends on the
+other to terminate.
+
+**Answers still stream.** Once the answer is a tool call its text arrives as
+fragments of JSON that is not valid yet, and waiting for the closing brace would
+replace a word-by-word answer with a one-second pause and a finished paragraph.
+So the stream handler pulls the partial `answer` string out of the incomplete
+JSON, honouring escapes so a half-arrived `\u0939` never reaches the page as
+backslash-u. Ten unit cases cover that extractor, including the split-escape one.
+
+**Retries and error recovery**, on both sides of the network:
+
+- the client retries `/synthesize` on transport errors and 429/5xx only —
+  never a 4xx, which is a request that will fail identically the second time —
+  with **exponential backoff and jitter**, because otherwise every visitor's
+  page retries in the same millisecond and turns a provider's recovery into a
+  second outage
+- the Worker does the same for its three outbound provider calls (Sarvam STT,
+  Sarvam TTS, ElevenLabs TTS), rebuilding the `FormData` per attempt — a body
+  that has been sent once cannot be sent again, and reusing it makes the retry
+  fail in a way that looks like the upstream rejecting the audio
+- a **circuit breaker** in front of the generator: after 3 consecutive failures
+  it opens for 20 s and calls fail in ~0 ms instead of waiting out a full
+  timeout, with one trial call allowed through on expiry
+- every failure path still leaves a grounded extractive answer on screen, so
+  none of this is load-bearing for the product working
+
+### How we know the loop works
+
+`npm run bench:tools` runs it twice over.
+
+**Against a scripted provider** (no API calls, no key): turn one asks for a
+search, turn two answers citing an excerpt that exists *only because the search
+ran*. That is the path a well-behaved model correctly never takes on
+well-retrieved queries — so without scripting it, the most important code would
+go untested precisely when everything is working. All 8 assertions pass: the
+tool is dispatched exactly once, turn 2 replays the call and its result, the
+appended excerpt arrives, and the citation index resolves to it.
+
+**Against Groq live**, on real corpus queries: every turn ended in an answer,
+**every answer named the excerpts it used**, zero fabricated citations, zero
+transport failures, and gate 3 passed all of them.
+
+---
+
 ## Architecture
 
 ```
                     ┌───────── measured: 200ms budget ─────────┐
- mic ─► Sarvam STT ─┤  embed → 6 corpus indices + your sources │─► grounded answer
+ mic ─► Sarvam STT ─┤  embed → 7 corpus indices + your sources │─► grounded answer
         (streaming) │  → RRF → rescore → gate 2 → extract      │
         partials ───┘         ALL IN THE BROWSER               │
                     └──────────────────────────────────────────┘
                                      │
-                                     └─► (off the clock) generate → gate 3 → the answer you read
+                                     └─► (off the clock) tool loop → gate 3a/3b → the answer you read
+                                                │        ▲
+                                                └────────┘
+                                          search_corpus runs HERE,
+                                          against the same index
 ```
 
 **Speculative retrieval:** partial transcripts trigger retrieval *while the user
 is still speaking*, so the answer is warm before they finish. The final
-transcript re-runs it for correctness.
+transcript re-runs it for correctness. That is also why the measured 276 ms of
+speech-to-text is not 276 ms of *waiting*: most of it elapses while the person
+is still talking.
 
 Two-stage retrieval keeps the worst case bounded:
 1. **binary codes + Hamming** over IVF clusters — wide net, capped candidates
@@ -380,40 +581,64 @@ measured query, so the fallback cannot flatter the numbers either. Under
 
 ### Latency — requirements 3 & 4
 
-**In-browser** (Chrome, M3 Pro, warm index, cache bypassed, distinct queries):
-
-| | dev, n=120 | production build, n=80 |
-|---|---|---|
-| **P50** | **7.71** | **8.46** |
-| **P100 (worst query)** | **9.47** | **23.05** |
-| under 200ms | 100% | 100% |
-
-**Node harness** (n=300, same modules, native onnxruntime). Reported across
-**five consecutive runs**, because one run would misrepresent the tail:
+**In-browser**, measured through the real app — 16 distinct Hindi questions
+asked one after another, each with generation and a pause in between, which is
+how a person actually uses it:
 
 | | ms |
 |---|---|
-| **P50** | **3.9 – 4.1** |
-| **P70** | **4.1 – 4.4** |
-| P90 / P95 / P99 | 4.5–5.1 / 4.7–5.7 / 5.3–8.1 |
-| **P100 (worst of 300)** | **5.9 – 15.9** |
-| mean | 3.8 – 4.1 |
+| **P50** | **18.8** |
+| **P70** | **26.9** |
+| **P100 (worst query)** | **27.5** |
+| under 200ms | **100%** |
+
+**That is 4x the Node figure, and the reason is instructive.** The browser runs
+the embedding graph on WASM where Node uses native onnxruntime, which accounts
+for most of it — but not all. The rest is cold cache: between two questions a
+person spends a second or two, the answer streams over the network, and the
+index's 154 MB of typed arrays fall out of L2/L3. The same effect shows up in
+the voice bench (11.3 ms with a network round trip between queries, against
+4.3 ms back-to-back).
+
+We report the interactive number rather than the back-to-back one because it is
+the number a user experiences. It is still **7x inside the budget**, and the
+Node column below is what to use for like-for-like comparisons, since it is the
+one measured the same way each time.
+
+**Node harness** (n=300, same modules, native onnxruntime), with all seven
+indices. Reported across **three consecutive runs**, because one run would
+misrepresent the tail:
+
+| | ms | before BM25 |
+|---|---|---|
+| **P50** | **4.3 – 4.5** | 3.9 – 4.1 |
+| **P70** | **4.7 – 4.9** | 4.1 – 4.4 |
+| P90 / P95 / P99 | 5.3–5.6 / 5.8–6.3 / 7.8–9.9 | 4.5–5.1 / 4.7–5.7 / 5.3–8.1 |
+| **P100 (worst of 300)** | **13.4 – 18.2** | 5.9 – 15.9 |
+| mean | 4.5 – 4.7 | 3.8 – 4.1 |
+
+**The seventh index costs about 0.4 ms at P50**, which is what a BM25 scan over
+three million postings is worth on this machine, and it buys the retrieval gain
+in the ablation above. Both columns are reported because a change that improves
+quality and costs latency should show both halves.
 
 **The tail is noisy and we are not going to pretend otherwise.** P50 is stable
-to within 0.2ms across runs; P100 varies 2.7x. Every bit of that spread is a
-single outlier inside one stage — `embed` p100 ranged 3.85 to 13.48 ms across
-the same five runs while its p50 never moved from ~1.8. That is a GC or
-scheduler event landing on one query out of three hundred, not a code path, and
-the honest way to report it is a range rather than the prettiest run.
+to within 0.2ms across runs; P100 varies. Every bit of that spread is a single
+outlier inside one stage — `embed` p100 ranges several-fold across runs while
+its p50 barely moves. That is a GC or scheduler event landing on one query out
+of three hundred, not a code path, and the honest way to report it is a range
+rather than the prettiest run.
 
-It also does not threaten anything: the worst P100 we recorded across five runs
-is **8% of the budget**.
+It also does not threaten anything: the worst P100 we recorded is **9% of the
+budget**.
 
-Per stage (Node, representative run, p50 / p100 ms): `embed 1.85 / 3.85` ·
-`retrieve 1.98 / 4.32` · `guard:input 0.01 / 1.24` · `rescore 0.03 / 0.15` ·
-`guard:retrieval 0.03 / 0.10` · `answer:extract 0.00 / 0.02`
+Per stage (Node, representative run, p50 / p100 ms): `embed 1.97 / 10.98` ·
+`retrieve 2.07 / 3.78` · `guard:input 0.02 / 1.91` · `rescore 0.01 / 0.05` ·
+`guard:retrieval 0.03 / 0.13` · `answer:extract 0.00 / 0.02`
 
-Searching all six indices costs **~2ms**. Query embedding dominates the budget.
+Searching all **seven** indices — six IVF scans plus a BM25 pass over three
+million postings — costs **~2 ms**, and its p100 is 3.78 ms. Query embedding
+dominates the budget and owns the tail.
 The browser and Node numbers differ because Node uses native onnxruntime while
 the browser uses WASM; **the browser number is the one that counts**, since that
 is where the system runs.
@@ -446,23 +671,42 @@ why fourteen 460 MB files cost a few MB instead of 6 GB.
 
 | language | P50 ms | P100 ms | hit@1 | hit@5 | answered |
 |---|---|---|---|---|---|
-| **हिन्दी** (corpus language) | 3.85 | 7.82 | 27.5% | **58.5%** | 90.0% |
-| English | 3.72 | 6.16 | 25.0% | 54.5% | 73.5% |
-| नेपाली | 3.81 | 8.46 | 19.5% | 48.0% | 71.5% |
-| മലയാളം | 5.57 | 9.70 | 16.0% | 41.5% | 63.5% |
-| বাংলা | 3.99 | 22.38 | 15.5% | 40.5% | 66.5% |
-| اردو | 4.00 | 21.48 | 16.5% | 40.0% | 56.0% |
-| ಕನ್ನಡ | 5.53 | 10.51 | 17.0% | 39.0% | 64.0% |
-| मराठी | 5.13 | 9.99 | 14.5% | 39.0% | 65.5% |
-| ਪੰਜਾਬੀ | 5.98 | 24.72 | 15.0% | 37.5% | 50.0% |
-| తెలుగు | 3.97 | 5.94 | 11.0% | 34.0% | 52.5% |
-| ગુજરાતી | 4.00 | 5.85 | 13.0% | 33.0% | 41.5% |
-| தமிழ் | 4.00 | 5.38 | 15.0% | 31.0% | 49.5% |
-| ଓଡ଼ିଆ | 5.56 | 13.44 | 14.0% | 30.0% | 48.0% |
-| संस्कृतम् | 4.49 | 9.45 | 12.0% | 26.0% | 33.0% |
-| অসমীয়া | 4.20 | 12.46 | 8.0% | 25.5% | 32.5% |
+| **हिन्दी** (corpus language) | 3.96 | 5.81 | 27.0% | **60.0%** | 88.0% |
+| English | 4.04 | 6.28 | 25.0% | 55.0% | 68.5% |
+| नेपाली | 4.06 | 16.33 | 20.5% | 49.0% | 68.5% |
+| മലയാളം | 4.28 | 9.19 | 16.0% | 41.5% | 56.0% |
+| বাংলা | 4.03 | 6.24 | 15.5% | 40.5% | 59.5% |
+| मराठी | 4.03 | 6.59 | 14.5% | 40.0% | 61.5% |
+| اردو | 4.09 | 8.17 | 16.5% | 40.0% | 48.5% |
+| ಕನ್ನಡ | 4.20 | 9.31 | 17.0% | 39.0% | 58.0% |
+| ਪੰਜਾਬੀ | 4.23 | 15.74 | 15.0% | 37.0% | 42.0% |
+| తెలుగు | 4.18 | 5.38 | 11.0% | 34.0% | 44.5% |
+| ગુજરાતી | 4.26 | 9.35 | 13.0% | 33.0% | 37.5% |
+| தமிழ் | 4.18 | 5.52 | 15.0% | 31.0% | 42.0% |
+| ଓଡ଼ିଆ | 4.17 | 5.55 | 14.0% | 30.0% | 41.5% |
+| संस्कृतम् | 4.21 | 5.83 | 12.5% | 26.5% | 31.0% |
+| অসমীয়া | 4.30 | 13.23 | 8.0% | 25.5% | 28.0% |
 
-**Pooled: P50 3.95 ms · P70 5.12 ms · P100 24.72 ms · 0.00% over budget.**
+**Pooled: P50 4.16 ms · P70 4.44 ms · P100 16.33 ms · 0.00% over budget.**
+
+**What BM25 did here, and did not.** Hindi's hit@5 rose 58.5% → 60.0% and
+English 54.5% → 55.0%; the twelve other languages barely moved. That is exactly
+what should happen and is worth stating rather than glossing: a lexical index
+matches *tokens*, so it helps the corpus language, and it helps English because
+this corpus was translated from English MS MARCO and shares its numbers, Latin
+acronyms and proper nouns. A Tamil question and a Hindi passage share no tokens
+at all, so BM25 contributes nothing there and the dense indices carry the whole
+result. **The seventh index is not a cross-lingual gain and we are not claiming
+one.**
+
+Answered rates fell a few points against the previous submission — Hindi 90.0%
+→ 88.0%, English 73.5% → 68.5%. That is the recalibration, not a regression in
+retrieval: adding BM25 shifted the score distribution, gate 2 was refitted on it,
+and the fitted threshold moved 0.4788 → 0.4938. On the split it was fitted on,
+that trade is favourable (abstention F1 0.364 → 0.400 with coverage unchanged at
+89.3%); on languages it was never fitted for, it costs coverage. The gap between
+hit@5 and answered is the thing to read, and the paragraph below is still the
+explanation for it.
 
 Two numbers per language, deliberately, because they fail for different reasons:
 
@@ -548,18 +792,35 @@ all.** Sign bits over raw embedding dimensions are near-worthless because those
 dimensions are correlated and off-centre. Dropping PCA to "keep more information"
 would have destroyed retrieval.
 
-End to end on the held-out query set (n=300): **hit@1 0.32, hit@3 0.54** over
-187 graded answerable queries.
+End to end on the held-out query set (n=300): **hit@1 0.323, hit@3 0.552** over
+192 graded answerable queries — up from 0.313 / 0.531 before the lexical index.
 
 ### Guardrails — requirement 6
 
-Gate 1 and gate 3: **25/25 unit tests pass**, including the false-positive guards
+Gates 1, 3a and 3b: **90/90 unit cases pass** (up from 72 — the new ones cover
+fabricated citations and the streaming JSON extractor), including the
+false-positive guards
 — "How do vaccines work?", "what caused the second world war", and "how to treat a
 snake bite" all correctly pass. The filter blocks operational harm requests, not
 subject matter. Self-harm routes to a support line rather than a bare refusal.
 
-Gate 2, on the MS MARCO answerable/unanswerable split (n=300):
-coverage of answerable **87.0%**, abstention precision 0.53, recall 0.36, F1 0.43.
+Gate 2, on the MS MARCO answerable/unanswerable split (n=300), with all seven
+indices and the refitted threshold:
+
+| | now | before BM25 |
+|---|---|---|
+| coverage of answerable | **89.3%** | 89.3% |
+| abstention precision | **0.540** | 0.511 |
+| abstention recall | **0.318** | 0.282 |
+| F1 | **0.400** | 0.364 |
+
+Adding a lexical index improved the *guardrail* as well as retrieval, which is
+not obvious and is worth saying why: BM25 gives a passage a second, independent
+reason to rank, so cross-strategy agreement — the signal gate 2 reads alongside
+the score — becomes a slightly better test of whether a hit is real.
+
+Holdout after refitting (never used for selection): coverage 84.5%, precision
+0.475, recall 0.309, F1 0.374.
 
 **Why those abstention numbers are modest, stated plainly.** MS MARCO's
 "unanswerable" queries still carry ten topically-relevant passages retrieved by
@@ -587,6 +848,7 @@ uv run python src/acquire.py --parquet data/raw/validation/hinval.parquet --quer
 uv run python src/chunking/build.py
 uv run python src/embed_all.py
 uv run python src/build_index.py
+uv run python src/lexical.py          # BM25 index — seconds, no embedding
 ```
 
 ```bash
@@ -601,7 +863,11 @@ npm install
 npm run calibrate              # fits the gate-2 threshold; writes public/thresholds.json
 npm run bench                  # P50 / P70 / P100 + retrieval quality
 npm run bench:deadline         # proves the cap holds under budget pressure
-npm run bench:gates            # 72 guardrail cases, incl. one per language
+npm run bench:gates            # 90 guardrail cases, incl. one per language
+npm run bench:lexparity        # the browser looks up the terms the builder indexed
+npm run bench:ablation         # leave-one-out: what each of the 7 indices is worth
+npm run bench:tools            # the tool-call loop, scripted and live
+npm run bench:voice            # end-to-end: real audio in, grounded answer out
 npm run bench:usersource       # gate 2 on user documents — the split that governs the rescue
 npm run bench:multilingual     # 15 languages x 200 queries, cross-lingual hit@k
 npm run bench:precomputed      # the stored-answer store matches only its own question
@@ -772,8 +1038,24 @@ in the worker.
   Sarvam returns a `language_code` with the transcript, that is used instead: a
   model that heard the speaker knows more than any heuristic.
 - **P100 is the true maximum** over the sample. No trimming, no outlier removal.
-- The `semantic` strategy has low yield on this corpus. We report that rather
-  than quietly dropping it.
+- **The `semantic` strategy does not pay for itself.** Removing it *improves*
+  hit@5 by 0.2 points, which is inside the noise — so the honest statement is
+  that it contributes nothing measurable on a corpus whose median passage is
+  three sentences. Its docstring predicted exactly this before it was built.
+  It stays because it costs 0.2 ms and adds a voter to the agreement signal
+  gate 2 reads, and it is reported here rather than quietly dropped.
+- **BM25 helps the corpus language and English, and nothing else.** It matches
+  tokens, so cross-lingual queries get nothing from it. The 15-language result
+  is carried by the dense indices, as it was before.
+- **The tool loop's second search is rare in practice.** On well-retrieved
+  corpus queries the model correctly answers straight away, so `search_corpus`
+  mostly does not fire. Its value is on the queries where the first retrieval
+  is off, and its correctness is proven by a scripted test rather than by
+  waiting for the live path to exercise it.
+- **The `/fetch-url` endpoint is deliberately not retried**, unlike the three
+  provider calls. It follows redirects manually with an SSRF re-check at every
+  hop, and a retry loop wrapped around that is a place to introduce a security
+  bug for the sake of a case the user can resolve by clicking again.
 - **Abstention on the MS MARCO unanswerable split is weak (AUC 0.65).** We report
   the number and the reason instead of quietly switching to an easier test set.
 - **Gate 2's threshold was fitted on MS MARCO prose.** A user source that is

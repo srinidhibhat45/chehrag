@@ -22,6 +22,16 @@ export type Refusal =
   | "LOW_CONFIDENCE"
   | "NO_AGREEMENT"
   | "UNGROUNDED"
+  /**
+   * The answer cited an excerpt that was never supplied.
+   *
+   * Distinct from UNGROUNDED, and worth distinguishing: an ungrounded answer
+   * asserts something the sources do not support, while this one asserts
+   * *where* it came from and is wrong about that. A model that invents excerpt
+   * 7 out of five has stopped reading and started composing, and its prose can
+   * still overlap the real passages well enough to pass a coverage test.
+   */
+  | "FABRICATED_CITATION"
   // A precondition rather than a judgement about the query. Kept distinct from
   // LOW_CONFIDENCE: "nothing matched" and "nothing was searched" are different
   // facts and need different messages.
@@ -432,6 +442,32 @@ export function gateGrounding(
       reason: "UNGROUNDED",
       message: "I drafted an answer but couldn't trace all of it back to my sources, so I'm not going to give it to you.",
       detail: { groundingScore: +score.toFixed(3), threshold: minCoverage },
+    };
+  }
+  return PASS;
+}
+
+/**
+ * Gate 3a — do the answer's citations refer to excerpts that exist?
+ *
+ * The model answers by calling a tool and naming the excerpts it used, so this
+ * is checkable rather than inferred. It runs before the grounding check because
+ * it decides *which* passages grounding is measured against: an answer that
+ * cites excerpt 7 of 5 cannot be checked at all, and passing it on the strength
+ * of the excerpts it did not claim to use would be checking the wrong thing.
+ *
+ * An empty citation list is not a failure. Some providers ignore the field, and
+ * the caller then falls back to checking against every excerpt supplied — a
+ * weaker test, but the honest one when the model has not said.
+ */
+export function gateCitations(cited: number[], available: number): GateResult {
+  const bad = cited.filter((n) => !Number.isInteger(n) || n < 1 || n > available);
+  if (bad.length) {
+    return {
+      pass: false,
+      reason: "FABRICATED_CITATION",
+      message: "I drafted an answer but it pointed at a source that doesn't exist, so I'm not going to give it to you.",
+      detail: { cited: bad.slice(0, 4).join(", "), available },
     };
   }
   return PASS;

@@ -26,3 +26,7 @@ SARVAM_API_KEY=
 
 # Spoken answers in English, Hindi and Tamil.
 ELEVENLABS_API_KEY=
+
+# Local development only — the Vite dev server's origin. Production's allowlist
+# lives in wrangler.toml; this file is never deployed.
+ALLOWED_ORIGIN=http://localhost:5173,http://localhost:4173

@@ -180,7 +180,9 @@ async function generateOnce(
   query: string,
   sources: Array<{ title: string; text: string }>,
 ): Promise<{ text: string } | { insufficient: true } | { error: string }> {
-  const stream = synthesizeStream(provider, query, sources);
+  // No tool executor here: this drains the stream directly, with no index to
+  // search. See `clientTools` in synthesize.ts.
+  const stream = synthesizeStream(provider, query, sources, [], { clientTools: false });
   const reader = stream.getReader();
   const dec = new TextDecoder();
   let buffer = "";

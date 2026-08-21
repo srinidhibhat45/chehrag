@@ -14,6 +14,7 @@
  * and exactly what search needs, so a reload replays straight into the index.
  */
 
+import { UserLexical } from "./lexical";
 import { UserIndex, type StrategyBucket } from "./flat";
 import { chunkPassages, toPassages, type Passage, type Strategy } from "./chunk";
 import { binarise, project, quantiseInt8, STRATEGY_IDS, STRATEGY_NAMES } from "./quantise";
@@ -85,6 +86,8 @@ export class SourceCancelled extends Error {
 
 export class SourceStore {
   readonly index: UserIndex;
+  /** BM25 over the same passages. See `sources/lexical.ts`. */
+  readonly lexical = new UserLexical();
   /** Text of every user passage, indexed by global user-passage ordinal. */
   readonly passages: string[] = [];
   /** Source id per user passage, so a citation can name where it came from. */
@@ -128,11 +131,27 @@ export class SourceStore {
 
   // -- search --------------------------------------------------------------
 
-  /** Bounded flat search, bucketed by strategy. Returns nothing when no source
-   *  is enabled, so the corpus-only path pays nothing for this. */
-  search(q: Float32Array, k: number): StrategyBucket[] {
+  /**
+   * Bounded flat search, bucketed by strategy. Returns nothing when no source
+   * is enabled, so the corpus-only path pays nothing for this.
+   *
+   * `tokens` adds the lexical bucket. Optional so a caller with only a vector
+   * still gets the six dense strategies rather than an error — but the app
+   * always passes them, because on a user's own document the exact-token match
+   * is usually the whole question.
+   */
+  search(q: Float32Array, k: number, tokens?: Iterable<string>): StrategyBucket[] {
     if (!this.hasEnabled) return EMPTY;
-    return this.index.search(q, k);
+    const buckets = this.index.search(q, k);
+    if (!tokens) return buckets;
+    const lex = this.lexical.search(tokens, k, this.index.disabled);
+    if (lex.n === 0) return buckets;
+    // Copied rather than pushed onto the index's own reused array: `UserIndex`
+    // hands back internal scratch that it resets on the next search.
+    return [...buckets, {
+      strategy: "lexical" as StrategyBucket["strategy"],
+      parentIds: lex.parentIds, scores: lex.scores, n: lex.n,
+    }];
   }
   prepareRescore(q: Float32Array): void { this.index.prepare(q); }
   rescore(userPassageId: number): number { return this.index.score(userPassageId); }
@@ -261,6 +280,7 @@ export class SourceStore {
       this.passages.push(t);
       this.passageSource.push(src.id);
     }
+    this.lexical.addPassages(base, passageText, src.id);
     const globalParents = new Int32Array(chunkParent.length);
     for (let i = 0; i < chunkParent.length; i++) globalParents[i] = base + chunkParent[i];
     this.index.addChunks(codes, globalParents, chunkStrategy, src.id, STRATEGY_NAMES);
@@ -291,6 +311,7 @@ export class SourceStore {
     if (!s) return;
     if (s.status === "indexing") { this.cancel(id); return; }
     this.index.removeSource(id);
+    this.lexical.removeSource(id);
     // Passage text stays in place: ordinals are permanent index keys, and
     // renumbering would invalidate every surviving chunk's parent. The orphans
     // are unreachable, since no chunk points at them any more.
@@ -437,6 +458,7 @@ export class SourceStore {
   /** Drop everything, including from storage. */
   async clear(): Promise<void> {
     this.index.clear();
+    this.lexical.clear();
     this.passages.length = 0;
     this.passageSource.length = 0;
     const ids = [...this.sources.keys()];

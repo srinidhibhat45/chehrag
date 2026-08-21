@@ -15,7 +15,11 @@
     "bench:deadline": "tsx bench/deadline.ts",
     "bench:usersource": "tsx bench/usersource.ts",
     "precompute": "tsx bench/precompute.ts",
-    "bench:precomputed": "tsx bench/precomputed.ts"
+    "bench:precomputed": "tsx bench/precomputed.ts",
+    "bench:ablation": "tsx bench/ablation.ts",
+    "bench:tools": "tsx bench/tools.ts",
+    "bench:voice": "tsx bench/voice.ts",
+    "bench:lexparity": "tsx bench/lexparity.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.7.6",

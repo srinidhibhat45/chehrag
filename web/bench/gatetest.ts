@@ -5,7 +5,8 @@
  * Gates 1 and 3 are deterministic and index-independent, so they are tested
  * directly. Gate 2 is data-driven and is measured by `bench/calibrate.ts`.
  */
-import { gateInput, gateGrounding, groundingScore, filterUngroundedSentences } from "../src/guardrails/gates";
+import { gateInput, gateGrounding, gateCitations, groundingScore, filterUngroundedSentences } from "../src/guardrails/gates";
+import { partialString } from "../../worker/src/synthesize";
 import { contentTokens } from "../src/retrieval/tokens";
 import { foldRomanisedHindi, isRomanisedHindi } from "../src/retrieval/translit";
 
@@ -270,6 +271,64 @@ for (const [input, shouldFold, expected] of FOLD) {
   ok ? pass++ : fail++;
   console.log(`${ok ? "  ok  " : "  FAIL"} ${JSON.stringify(input).padEnd(44)} -> ` +
               `${JSON.stringify(got)}${ok ? "" : ` expected ${JSON.stringify(expected ?? input)}`}`);
+}
+
+// -- gate 3a — citations must point at excerpts that exist -------------------
+//
+// The model answers by calling a tool and naming the excerpts it used, which
+// makes the claim checkable. An index outside the supplied set means the answer
+// was composed rather than read, and its prose can still overlap the real
+// passages well enough to pass the coverage test underneath.
+console.log("\n" + "=".repeat(70));
+console.log("GATE 3a — fabricated citations");
+console.log("=".repeat(70));
+
+const CITE: Array<[number[], number, boolean, string]> = [
+  [[1, 2], 3, true,  "cites excerpts that exist"],
+  [[3], 3, true,      "cites the last excerpt"],
+  [[], 3, true,       "no citations — degrades to checking against all, not a failure"],
+  [[4], 3, false,     "REJECTED: cites excerpt 4 of 3"],
+  [[0], 3, false,     "REJECTED: indices are 1-based, 0 is not an excerpt"],
+  [[-1], 3, false,    "REJECTED: negative index"],
+  [[1, 9], 3, false,  "REJECTED: one real citation does not license an invented one"],
+  [[1.5], 3, false,   "REJECTED: non-integer index"],
+];
+for (const [cited, avail, shouldPass, label] of CITE) {
+  const g = gateCitations(cited, avail);
+  const ok = g.pass === shouldPass;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}`);
+}
+
+// -- streaming JSON extraction ----------------------------------------------
+//
+// Once the answer is a tool call, its text arrives as fragments of JSON that is
+// not valid yet. This is what keeps it streaming word by word instead of
+// landing all at once when the call closes. A bug here is visible as garbled
+// text on screen — backslash-u, half a Devanagari codepoint — so the escape
+// cases matter as much as the happy path.
+console.log("\n" + "=".repeat(70));
+console.log("STREAMING — answer text out of incomplete JSON");
+console.log("=".repeat(70));
+
+const PARTIAL: Array<[string, string, string]> = [
+  ['{"answer":"You are 4', "You are 4", "mid-word, quote still open"],
+  ['{"answer":"You are 45.","excerpt_indices":[1]}', "You are 45.", "complete object"],
+  ['{"answer":"", ', "", "empty so far"],
+  ['{"excerpt_indices":[1],"answer":"After the other key"', "After the other key", "key order is not assumed"],
+  ['{"answer":"She said \\"hi\\" to me', 'She said "hi" to me', "escaped quotes do not close the string"],
+  ['{"answer":"line one\\nline two', "line one\nline two", "newline escape"],
+  ['{"answer":"\\u0939\\u093f', "हि", "unicode escapes are decoded"],
+  ['{"answer":"half a codepoint \\u09', "half a codepoint ", "a split \\u escape waits rather than emitting junk"],
+  ['{"other":"x"}', "", "key absent"],
+  ['', "", "nothing yet"],
+];
+for (const [json, expected, label] of PARTIAL) {
+  const got = partialString(json, "answer");
+  const ok = got === expected;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}` +
+              (ok ? "" : `\n         got ${JSON.stringify(got)} expected ${JSON.stringify(expected)}`));
 }
 
 console.log("\n" + "=".repeat(70));

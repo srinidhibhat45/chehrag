@@ -11,9 +11,23 @@ So the axes that pay on this corpus are:
   (c) changing what gets embedded  -> contextual enrichment
   (d) changing the matching rule   -> lexical BM25 alongside dense
 
-Each strategy below states what it wins and what it costs. Strategy 5 (semantic)
-is included knowing it has little room on 3-sentence passages; its contribution
-is measured rather than assumed.
+(a) through (c) live in this file. (d) is not a chunking strategy at all — it
+indexes the same unit as `whole` and changes how a match is decided — so it
+lives in `pipeline/src/lexical.py` and is fused as a seventh index.
+
+Each strategy below states what it wins and what it costs, and
+`web/bench/ablation.ts` measures those claims by removing one index at a time.
+That measurement is worth reading before trusting anything in this file: over
+1,412 answerable queries, no single dense strategy is worth more than 0.4
+points of hit@5, because they find largely the same passages by slightly
+different routes. Removing the BM25 index costs 2.3 points of hit@5 and 3.7 of
+hit@10. Changing the matching rule buys more than any amount of changing where
+the cut falls.
+
+Which is an argument for the shape of the ensemble, not against the dense
+strategies: fusion needs several imperfect voters, and the dense six are what
+make a rank agree across strategies — the signal guardrail gate 2 reads to
+decide whether a hit is real.
 """
 
 from __future__ import annotations

@@ -22,10 +22,11 @@ import type { LoadedIndex } from "../retrieval/loader";
 import { fuse, fusionMargin, lexicalOverlap, type FusedHit, type StrategyHits } from "../retrieval/fusion";
 import type { SourceStore } from "../sources/store";
 import {
-  gateInput, gateRetrieval, gateGrounding, DEFAULT_THRESHOLDS,
+  gateInput, gateRetrieval, gateGrounding, gateCitations, DEFAULT_THRESHOLDS,
   type ConfidenceThresholds, type GateResult, type Refusal, type RetrievalSignals,
 } from "../guardrails/gates";
 import { foldRomanisedHindi } from "../retrieval/translit";
+import { contentTokens } from "../retrieval/tokens";
 
 export interface Encoder {
   /** Returns a raw 384-d L2-normalised embedding for a query string. */
@@ -91,6 +92,15 @@ export interface RagConfig {
   rescoreTopN: number;
   thresholds: ConfidenceThresholds;
   globalBudgetMs: number;
+  /**
+   * Which indices take part, or null for all of them.
+   *
+   * Exists for the leave-one-out ablation (`bench/ablation.ts`), which is the
+   * only way to say what a strategy is worth rather than asserting it. Left
+   * null everywhere in the product: a strategy that is not worth its place
+   * should be deleted from the build, not switched off at query time.
+   */
+  enabledStrategies?: string[] | null;
 }
 
 export const DEFAULT_CONFIG: RagConfig = {
@@ -100,6 +110,7 @@ export const DEFAULT_CONFIG: RagConfig = {
   rescoreTopN: 16,
   thresholds: DEFAULT_THRESHOLDS,
   globalBudgetMs: 200,
+  enabledStrategies: null,
 };
 
 /**
@@ -354,17 +365,34 @@ export class RagEngine {
           plan = budgetPlan(ctx.remaining(), cfg, store?.activeChunks ?? 0);
 
           const hits: StrategyHits[] = [];
+          const enabled = cfg.enabledStrategies;
+          const on = (name: string) => !enabled || enabled.includes(name);
           if (this.corpusEnabled) {
             for (const [name, ix] of idx.indices) {
+              if (!on(name)) continue;
               const r = ix.search(qv, plan.nprobe, plan.perStrategyK);
               if (r.n > 0) {
                 hits.push({ strategy: name, parentIds: r.parentIds, scores: r.scores, n: r.n });
               }
             }
+            // BM25 over the same passages. It takes the query's text rather
+            // than its vector — it is the one index that never sees an
+            // embedding — and it takes the *folded* text, so a romanised Hindi
+            // question looks up Devanagari terms like any other.
+            if (idx.lexical && on("lexical")) {
+              const r = idx.lexical.search(contentTokens(q), plan.perStrategyK);
+              if (r.n > 0) {
+                hits.push({ strategy: "lexical", parentIds: r.parentIds, scores: r.scores, n: r.n });
+              }
+            }
           }
           // User sources join the same fusion, offset into the shared id space.
+          // They get the same seven strategies as the corpus: the tokens are
+          // what adds BM25, and on a document of names, dates and amounts it is
+          // usually the only one that can match at all.
           if (store) {
-            for (const b of store.search(qv, plan.perStrategyK)) {
+            for (const b of store.search(qv, plan.perStrategyK,
+                                         on("lexical") ? contentTokens(q) : undefined)) {
               if (b.n === 0) continue;
               const ids = new Int32Array(b.n);
               for (let i = 0; i < b.n; i++) ids[i] = USER_BASE + b.parentIds[i];
@@ -545,10 +573,67 @@ export class RagEngine {
   invalidate(): void { this.cache.clear(); }
 
   /**
+   * Retrieval on behalf of the model's `search_corpus` tool.
+   *
+   * Runs the ordinary pipeline — same budget, same deadline planner, same
+   * degradation — and then reads `retrieved` rather than `citations`, because
+   * the guardrails' opinion of the *model's* rephrasing is not the question
+   * being asked here. Gate 2 decides whether an answer reaches the user; this
+   * is the model asking to look something up, and its output is checked again
+   * by gate 3 before any of it is shown.
+   *
+   * Passages already in front of the model are excluded, so a rephrasing that
+   * finds the same thing costs a round trip rather than filling the context
+   * with duplicates.
+   */
+  async searchAgain(query: string, exclude: Set<number>, k = 3): Promise<Citation[]> {
+    const r = await this.ask(query, { skipCache: true });
+    const out: Citation[] = [];
+    for (const pid of r.retrieved ?? []) {
+      if (exclude.has(pid)) continue;
+      const text = this.textOf(pid);
+      if (!text) continue;
+      out.push({ passageId: pid, text, score: 0, strategies: [], source: this.sourceOf(pid) });
+      if (out.length >= k) break;
+    }
+    return out;
+  }
+
+  /**
    * Verify an LLM-synthesised answer before it replaces the extractive one.
    * Runs off the fast path.
    */
   verifySynthesis(answer: string, citations: Citation[]): GateResult {
     return gateGrounding(answer, citations.map((c) => c.text));
+  }
+
+  /**
+   * Gate 3 over a tool-call answer, where the model named its sources.
+   *
+   * Two checks in order. The citations must point at excerpts that were
+   * actually supplied — an index outside the set is a fabricated citation, and
+   * it fails whatever the prose says. Then grounding is measured against *those
+   * excerpts only*, which is a strictly harder test than the old one: an answer
+   * written from excerpt 1 while citing excerpt 3 used to pass on the union and
+   * now does not.
+   *
+   * With no citations at all — a provider that ignored the field — it degrades
+   * to checking against everything supplied, and says so by way of the
+   * `checkedAgainst` detail rather than silently.
+   */
+  verifyGenerated(
+    answer: string,
+    sources: Array<{ text: string }>,
+    cited: number[],
+  ): GateResult {
+    const citations = gateCitations(cited, sources.length);
+    if (!citations.pass) return citations;
+    const used = cited.length
+      ? cited.map((i) => sources[i - 1]?.text ?? "")
+      : sources.map((s) => s.text);
+    const g = gateGrounding(answer, used.filter(Boolean));
+    return g.pass
+      ? { ...g, detail: { ...(g.detail ?? {}), checkedAgainst: cited.length || sources.length } }
+      : g;
   }
 }

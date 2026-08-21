@@ -1,6 +1,6 @@
 import { defineConfig, loadEnv, type Plugin, type Connect } from "vite";
 import type { ServerResponse } from "node:http";
-import { synthesizeStream, resolveProvider, SSE_HEADERS } from "../worker/src/synthesize";
+import { synthesizeStream, resolveProvider, SSE_HEADERS, type Turn } from "../worker/src/synthesize";
 
 /**
  * Cross-origin isolation, which is what lets onnxruntime use SharedArrayBuffer
@@ -68,7 +68,11 @@ function generatorDevServer(env: Record<string, string>): Plugin {
     let raw = "";
     for await (const chunk of req) raw += chunk;
 
-    let body: { query?: string; sources?: Array<{ title?: string; text?: string }> };
+    let body: {
+      query?: string;
+      sources?: Array<{ title?: string; text?: string }>;
+      transcript?: Turn[];
+    };
     try { body = JSON.parse(raw); } catch { res.statusCode = 400; res.end(); return; }
 
     const query = (body.query ?? "").trim();
@@ -77,8 +81,14 @@ function generatorDevServer(env: Record<string, string>): Plugin {
       .map((s) => ({ title: String(s.title ?? "your source"), text: String(s.text) }));
     if (!query || !sources.length) { res.statusCode = 400; res.end(); return; }
 
+    // The tool transcript is replayed the same way the Worker replays it, so
+    // the loop behaves identically in development and in production. No
+    // validation here that the Worker does not also do — this server is bound
+    // to localhost and its input comes from the page it is serving.
     for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v);
-    await pipeToNode(synthesizeStream(provider, query, sources), res);
+    await pipeToNode(
+      synthesizeStream(provider, query, sources, Array.isArray(body.transcript) ? body.transcript : []),
+      res);
   };
 
   return {
