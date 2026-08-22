@@ -736,6 +736,18 @@ async function toggleMic(): Promise<void> {
         // Speech has visibly failed, so open the keyboard rather than leaving
         // a lamp that just stopped working as the only way in.
         setTyping(true);
+      } else if (e.type === "closed") {
+        // Reached only when the socket died without a preceding `error` or
+        // `final` - `recording` is still true, so this was not `stopMic()`
+        // closing its own connection. Without this branch that disconnect was
+        // invisible: the lamp stayed on "Listening..." forever with a dead
+        // socket underneath it and no way out but tapping the lamp again.
+        if (recording) {
+          live.dataset.error = "1";
+          live.textContent = "Speech connection closed unexpectedly.";
+          void stopMic("idle");
+          setTyping(true);
+        }
       }
     },
   });

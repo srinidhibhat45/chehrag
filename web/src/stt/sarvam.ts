@@ -111,7 +111,7 @@ export class SarvamStt {
     });
 
     ws.onmessage = (ev) => {
-      let msg: { event?: string; text?: string; language?: string };
+      let msg: { event?: string; text?: string; language?: string; message?: string; code?: string };
       try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ""); } catch { return; }
       switch (msg.event) {
         case "transcript.partial":
@@ -122,9 +122,22 @@ export class SarvamStt {
           break;
         case "vad.speech_start": this.opts.onEvent({ type: "speech_start" }); break;
         case "vad.speech_end":   this.opts.onEvent({ type: "speech_end" }); break;
+        // Sarvam's own fatal errors (quota exhausted, bad model, rate limit, ...)
+        // arrive as a message on the open socket, not as a close code - without
+        // this case they were dropped silently and the UI hung on "Listening..."
+        // forever once the server closed the connection underneath it.
+        case "error":
+          this.opts.onEvent({
+            type: "error",
+            message: msg.message ?? (msg.code ? `Sarvam error: ${msg.code}` : "Sarvam speech-to-text error"),
+          });
+          break;
       }
     };
-    ws.onclose = () => this.opts.onEvent({ type: "closed" });
+    ws.onclose = () => {
+      if (this.pingTimer != null) { clearInterval(this.pingTimer); this.pingTimer = null; }
+      this.opts.onEvent({ type: "closed" });
+    };
 
     // Sarvam closes idle sockets with 1008; a periodic ping keeps it alive.
     this.pingTimer = window.setInterval(() => {
